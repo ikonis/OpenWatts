@@ -1,0 +1,61 @@
+
+(rules PCB OpenWatts.dsn
+  (snap_angle 
+    fortyfive_degree
+  )
+  (rule
+    (width 200.0)
+    (clearance 150.0)
+    (clearance 100.0 (type smd_to_turn_gap))
+    (clearance 37.6 (type smd))
+    (clearance 150.0 (type "kicad_default"))
+  )
+  (padstack "Via[0-1]_600:300_um"
+    (shape
+      (circle F.Cu 600.0 0.0 0.0)
+    )
+    (shape
+      (circle B.Cu 600.0 0.0 0.0)
+    )
+    (attach off)
+  )
+  (via 
+    "Via[0-1]_600:300_um" "Via[0-1]_600:300_um" default
+  )
+  (via 
+    "Via[0-1]_600:300_um-kicad_default" "Via[0-1]_600:300_um" "kicad_default"
+  )
+  (via_rule
+    default "Via[0-1]_600:300_um"
+  )
+  (via_rule
+    "kicad_default" "Via[0-1]_600:300_um-kicad_default"
+  )
+  (class default
+    (clearance_class default)
+    (via_rule default)
+    (rule
+      (width 200.0)
+    )
+    (circuit 
+      (use_layer F.Cu B.Cu)
+    )
+  )
+  (class "kicad_default"
+    "Net-(D2-A)" /+3V3 "unconnected-(U4-BASE-Pad2)" /GND "unconnected-(U4-VBG-Pad6)" "/A-" /A+ "unconnected-(U4-INB--Pad9)"
+    "unconnected-(U4-INB+-Pad10)" "/HX_SCK" "/HX_DOUT" "unconnected-(U4-XO-Pad13)" "/CHG_STAT" /VBAT /VBUS "Net-(U1-PROG)"
+    "unconnected-(U6-SDX-Pad2)" "unconnected-(U6-SCX-Pad3)" "/IMU_INT" "unconnected-(U6-INT2-Pad9)" "unconnected-(U6-NC-Pad10)" "unconnected-(U6-NC-Pad11)" "/I2C_SCL" "/I2C_SDA"
+    "unconnected-(U5-NC-Pad4)" "/USB_PRESENT" "/GREEN_LED" "unconnected-(U5-NC-Pad7)" /EN "unconnected-(U5-NC-Pad9)" "unconnected-(U5-NC-Pad10)" "unconnected-(U5-NC-Pad15)"
+    "unconnected-(U5-NC-Pad17)" "/BAT_ADC" /BOOT "unconnected-(U5-NC-Pad24)" "unconnected-(U5-NC-Pad25)" "/USB_D-" "/USB_D+" "unconnected-(U5-NC-Pad28)"
+    "unconnected-(U5-NC-Pad29)" "/UART_RX" "/UART_TX" "unconnected-(U5-NC-Pad32)" "unconnected-(U5-NC-Pad33)" "unconnected-(U5-NC-Pad34)" "unconnected-(U5-NC-Pad35)" "Net-(D3-A)"
+    "Net-(J1-CC1)" "unconnected-(J1-SBU1-PadA8)" "Net-(J1-CC2)" "unconnected-(J1-SBU2-PadB8)" "unconnected-(U2-NC-Pad4)" "Net-(U5-GPIO2{slash}ADC1_CH2)"
+    (clearance_class "kicad_default")
+    (via_rule "kicad_default")
+    (rule
+      (width 200.0)
+    )
+    (circuit 
+      (use_layer F.Cu B.Cu)
+    )
+  )
+)
