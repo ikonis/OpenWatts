@@ -1,4 +1,5 @@
 .history/
+*.lck
 firmware/.pio/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
