@@ -1,1 +1,4 @@
 .history/
+firmware/.pio/
+firmware/sdkconfig.*
+!firmware/sdkconfig.defaults
