@@ -11,6 +11,8 @@ class Hx711 {
 public:
     Hx711(gpio_num_t dout, gpio_num_t sck);
     esp_err_t begin();
+    esp_err_t prepareForSleep();
+    esp_err_t resumeFromSleep();
     bool read(int32_t &value, uint32_t timeout_ms = 100);
     void observe(bool success, int32_t raw_value, float smoothing);
     bool ready() const;

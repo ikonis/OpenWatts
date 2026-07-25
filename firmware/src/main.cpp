@@ -79,7 +79,7 @@ extern "C" void app_main() {
 
     ESP_ERROR_CHECK(g_setup_wifi.begin(g_config, g_settings, usb_present, setup_requested));
 
-    err = g_ble.begin();
+    err = g_ble.begin(g_config.ble_device_name);
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "BLE init failed: %s", esp_err_to_name(err));
     }
@@ -88,6 +88,7 @@ extern "C" void app_main() {
     }
 
     int64_t last_publish_us = 0;
+    bool previous_usb_present = usb_present;
     while (true) {
         openwatts::board::setGreenLed(true);
 
@@ -99,6 +100,19 @@ extern "C" void app_main() {
         g_imu.read(imu_sample);
 
         const int64_t now_us = esp_timer_get_time();
+        const bool current_usb_present = openwatts::board::usbPresent();
+        if (current_usb_present != previous_usb_present) {
+            previous_usb_present = current_usb_present;
+            ESP_LOGI(kTag, "USB %s", current_usb_present ? "inserted" : "removed");
+            if (current_usb_present) {
+                const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, true, false);
+                if (wifi_err != ESP_OK) {
+                    ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
+                }
+            } else {
+                g_setup_wifi.stop();
+            }
+        }
         const openwatts::CadenceState cadence = g_cadence.update(imu_sample, now_us);
         const openwatts::PowerSample sample = g_power.update(raw_counts, g_hx711.filtered(), g_hx711.noiseEstimate(),
                                                              g_hx711.ready(), cadence);
@@ -113,8 +127,11 @@ extern "C" void app_main() {
                      g_setup_wifi.active() ? 1 : 0);
         }
 
-        if (g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
-            g_power_manager.enterSleep(g_ble, g_setup_wifi);
+        if (!current_usb_present && g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
+            const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu);
+            if (sleep_err != ESP_OK) {
+                ESP_LOGW(kTag, "sleep/wake failed: %s", esp_err_to_name(sleep_err));
+            }
         }
         openwatts::board::setGreenLed(false);
         vTaskDelay(pdMS_TO_TICKS(g_config.sample_interval_ms));

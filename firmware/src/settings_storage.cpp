@@ -1,5 +1,6 @@
 #include "settings_storage.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "esp_log.h"
@@ -17,6 +18,12 @@ DeviceConfig sanitized(DeviceConfig config) {
     }
     config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
     config.wifi_password[sizeof(config.wifi_password) - 1] = '\0';
+    config.ble_device_name[sizeof(config.ble_device_name) - 1] = '\0';
+    config.mqtt_host[sizeof(config.mqtt_host) - 1] = '\0';
+    config.mqtt_topic[sizeof(config.mqtt_topic) - 1] = '\0';
+    if (config.ble_device_name[0] == '\0') {
+        std::strncpy(config.ble_device_name, "OpenWatts", sizeof(config.ble_device_name) - 1);
+    }
     if (config.sample_interval_ms < 10) {
         config.sample_interval_ms = 10;
     }
@@ -26,9 +33,17 @@ DeviceConfig sanitized(DeviceConfig config) {
     if (config.inactivity_timeout_ms < 5000) {
         config.inactivity_timeout_ms = 5000;
     }
-    if (config.timer_wake_seconds == 0) {
-        config.timer_wake_seconds = 5;
+    if (config.timer_wake_seconds < 60) {
+        config.timer_wake_seconds = 60;
     }
+    config.imu_wake_threshold = std::min<uint8_t>(config.imu_wake_threshold, 0x3F);
+    config.imu_wake_duration = std::min<uint8_t>(config.imu_wake_duration, 3);
+    config.mqtt_port = config.mqtt_port == 0 ? 1883 : config.mqtt_port;
+    config.mqtt_charge_soon_percent = std::min<uint8_t>(config.mqtt_charge_soon_percent, 100);
+    config.mqtt_charge_now_percent =
+        std::min(config.mqtt_charge_now_percent, config.mqtt_charge_soon_percent);
+    config.mqtt_critical_percent =
+        std::min(config.mqtt_critical_percent, config.mqtt_charge_now_percent);
     return config;
 }
 }  // namespace

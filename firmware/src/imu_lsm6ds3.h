@@ -17,6 +17,9 @@ class Lsm6ds3 {
 public:
     explicit Lsm6ds3(uint8_t address = 0x6A);
     esp_err_t begin();
+    esp_err_t configureActiveMode();
+    esp_err_t configureWakeMode(uint8_t threshold, uint8_t duration);
+    esp_err_t clearWakeSource(uint8_t *source = nullptr);
     bool read(ImuSample &sample);
     uint8_t whoAmI() const;
 

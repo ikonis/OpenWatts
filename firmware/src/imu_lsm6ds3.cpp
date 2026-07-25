@@ -11,7 +11,13 @@ constexpr uint8_t kRegWhoAmI = 0x0F;
 constexpr uint8_t kRegCtrl1Xl = 0x10;
 constexpr uint8_t kRegCtrl2G = 0x11;
 constexpr uint8_t kRegCtrl3C = 0x12;
+constexpr uint8_t kRegCtrl6C = 0x15;
+constexpr uint8_t kRegWakeUpSrc = 0x1B;
 constexpr uint8_t kRegOutxLG = 0x22;
+constexpr uint8_t kRegTapCfg = 0x58;
+constexpr uint8_t kRegWakeUpThs = 0x5B;
+constexpr uint8_t kRegWakeUpDur = 0x5C;
+constexpr uint8_t kRegMd1Cfg = 0x5E;
 constexpr uint8_t kExpectedWhoAmI = 0x69;
 constexpr int kI2cTimeoutMs = 100;
 
@@ -40,13 +46,40 @@ esp_err_t Lsm6ds3::begin() {
         ESP_LOGW(kTag, "unexpected WHO_AM_I=0x%02x, expected 0x%02x", who_am_i_, kExpectedWhoAmI);
     }
 
-    // BDU=1, auto-increment=1.
-    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl3C, 0x44), kTag, "CTRL3_C");
-    // 104 Hz accel, +/-4 g.
-    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl1Xl, 0x48), kTag, "CTRL1_XL");
-    // 104 Hz gyro, 500 dps.
-    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl2G, 0x44), kTag, "CTRL2_G");
-    return ESP_OK;
+    return configureActiveMode();
+}
+
+esp_err_t Lsm6ds3::configureActiveMode() {
+    // BDU=1, auto-increment=1, INT active-high push-pull.
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl3C, 0x44), kTag, "CTRL3_C active");
+    ESP_RETURN_ON_ERROR(writeReg(kRegTapCfg, 0x00), kTag, "TAP_CFG active");
+    ESP_RETURN_ON_ERROR(writeReg(kRegMd1Cfg, 0x00), kTag, "MD1_CFG active");
+    // 104 Hz accelerometer +/-4 g and gyro 500 dps.
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl1Xl, 0x48), kTag, "CTRL1_XL active");
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl2G, 0x44), kTag, "CTRL2_G active");
+    return clearWakeSource();
+}
+
+esp_err_t Lsm6ds3::configureWakeMode(uint8_t threshold, uint8_t duration) {
+    // Accelerometer low-power mode, 12.5 Hz, +/-4 g; gyroscope powered down.
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl2G, 0x00), kTag, "CTRL2_G sleep");
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl6C, 0x10), kTag, "CTRL6_C XL low power");
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl1Xl, 0x18), kTag, "CTRL1_XL wake");
+    ESP_RETURN_ON_ERROR(writeReg(kRegWakeUpThs, threshold & 0x3FU), kTag, "WAKE_UP_THS");
+    ESP_RETURN_ON_ERROR(writeReg(kRegWakeUpDur, (duration & 0x03U) << 5U), kTag, "WAKE_UP_DUR");
+    // Enable basic interrupts, slope filtering, non-latched output.
+    ESP_RETURN_ON_ERROR(writeReg(kRegTapCfg, 0x80), kTag, "TAP_CFG wake");
+    ESP_RETURN_ON_ERROR(writeReg(kRegMd1Cfg, 0x20), kTag, "MD1_CFG INT1_WU");
+    return clearWakeSource();
+}
+
+esp_err_t Lsm6ds3::clearWakeSource(uint8_t *source) {
+    uint8_t value = 0;
+    const esp_err_t err = readReg(kRegWakeUpSrc, value);
+    if (source != nullptr) {
+        *source = value;
+    }
+    return err;
 }
 
 bool Lsm6ds3::read(ImuSample &sample) {

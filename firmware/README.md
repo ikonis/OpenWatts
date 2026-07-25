@@ -8,7 +8,7 @@ Initial ESP32-C3 firmware scaffold for the OpenWatts PCB.
 - Normal runtime interface: BLE Cycling Power Service.
 - Wi-Fi is for setup/configuration and USB-powered maintenance only.
 - Wi-Fi remains off during normal battery runtime.
-- Setup AP starts only when credentials are missing, or when USB is present and setup is requested with BOOT held.
+- The maintenance AP exists only while USB is present and stops immediately when USB is removed.
 - LSM6DS3 `SDO/SA0` is strapped low, so the IMU I2C address is `0x6A`.
 - HX711 is connected directly to ESP32-C3 GPIOs.
 - No Zigbee or Thread support is included.
@@ -46,15 +46,31 @@ Initial ESP32-C3 firmware scaffold for the OpenWatts PCB.
 - NVS-backed settings storage.
 - Captive setup portal: `OpenWatts-Setup`, wildcard DNS redirect, HTTP setup page, `/save`, `/selftest`.
 - First-boot or BOOT-requested hardware self-test.
-- Configurable deep sleep after zero cadence, 60 seconds by default.
+- Configurable accelerometer-armed light sleep after zero cadence, 60 seconds by default.
+- LSM6DS3 low-power wake detection on `IMU_INT`/GPIO10. GPIO10 is not an
+  ESP32-C3 RTC GPIO, so it cannot wake this board from deep sleep.
+- HX711 is powered down before light sleep and resumed after motion wake.
+- BLE advertising is stopped for light sleep and restored after wake.
+- USB insertion/removal is monitored at runtime; USB enables the maintenance
+  AP and removal stops Wi-Fi immediately.
+- BLE device name and future battery-notification/MQTT policy fields are
+  persisted in the versioned NVS settings blob.
 
 ## Stubbed / TODO
 
 - IMU cadence algorithm calibration, axis selection, filtering, and false-positive rejection.
-- LSM6DS3 motion interrupt configuration for wake from deep sleep.
+- Validate LSM6DS3 wake threshold/duration and INT1 polarity on production hardware.
 - ESP GPIO wake from USB/BOOT after wake-source electrical behavior is validated.
 - HX711 zeroing, temperature drift handling, and torque calibration.
 - Battery ADC divider scaling and eFuse ADC calibration.
+- Convert the USB maintenance AP to STA+fallback-AP operation and add the
+  USB-only dashboard/OTA pages.
+- Implement the one-shot MQTT battery notification only after calibrated
+  battery voltage/percentage is available. Defaults are reserved in NVS:
+  broker `192.168.1.28:1883`, topic `openwatts/battery`, thresholds 20/10/5%.
+- Validate light-sleep current on the assembled PCB. The expected architecture
+  keeps only the ESP32-C3 light-sleep domain and LSM6DS3 low-power accelerometer
+  active; the routed GPIO10 prevents true motion-wake deep sleep.
 - Production BLE Cycling Power feature bits after calibration fields are finalized.
 
 ## First Bring-Up Steps
@@ -67,4 +83,5 @@ Initial ESP32-C3 firmware scaffold for the OpenWatts PCB.
 6. On first boot, read serial self-test output and BLE diagnostics characteristic.
 7. If credentials are missing, connect to `OpenWatts-Setup` and open `http://192.168.4.1/`.
 8. Spin/rotate the crank fixture and log IMU axis data before replacing the cadence stub.
-9. Disable or tune deep sleep during bench debugging if it interrupts testing.
+9. Leave the unit stationary for the configured timeout, confirm entry to light
+   sleep, then move it and confirm an `imu_source` wake log and BLE advertising.

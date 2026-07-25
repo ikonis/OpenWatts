@@ -90,8 +90,8 @@ esp_err_t rootHandler(httpd_req_t *req) {
         "<form method='post' action='/save'>"
         "<label>Wi-Fi SSID <input name='ssid' maxlength='32'></label><br>"
         "<label>Password <input name='password' type='password' maxlength='64'></label><br>"
-        "<label><input type='checkbox' name='sleep' checked> Deep sleep enabled</label><br>"
-        "<label>Inactivity timeout ms <input name='timeout' value='60000'></label><br>"
+        "<label><input type='checkbox' name='sleep' checked> Motion-wake sleep enabled</label><br>"
+        "<label>Inactivity timeout ms (5000 minimum) <input name='timeout' value='60000'></label><br>"
         "<button type='submit'>Save</button></form>"
         "<p><a href='/selftest'>Self-test status</a></p></body></html>";
     httpd_resp_set_type(req, "text/html");
@@ -127,7 +127,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
     std::strncpy(config.wifi_password, password.c_str(), sizeof(config.wifi_password) - 1);
     config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
     config.wifi_password[sizeof(config.wifi_password) - 1] = '\0';
-    config.deep_sleep_enabled = body.find("sleep=on") != std::string::npos;
+    config.light_sleep_enabled = body.find("sleep=on") != std::string::npos;
     if (!timeout.empty()) {
         config.inactivity_timeout_ms = std::max<uint32_t>(5000, static_cast<uint32_t>(std::strtoul(timeout.c_str(), nullptr, 10)));
     }
@@ -201,14 +201,12 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
     config_ = &config;
     storage_ = &storage;
 
-    const bool missing_credentials = !config.hasWifiCredentials();
-    const bool allow_requested_usb_setup = usb_present && (setup_requested || config.force_setup_portal);
-    if (!missing_credentials && !allow_requested_usb_setup) {
-        ESP_LOGI(kTag, "USB not present; Wi-Fi stays off for battery runtime");
+    if (!usb_present) {
+        ESP_LOGI(kTag, "USB absent; Wi-Fi remains off");
         return ESP_OK;
     }
 
-    if (!missing_credentials && !config.wifi_setup_on_usb && !config.force_setup_portal) {
+    if (!config.wifi_setup_on_usb && !setup_requested && !config.force_setup_portal) {
         ESP_LOGI(kTag, "USB present but setup Wi-Fi disabled by config");
         return ESP_OK;
     }
@@ -248,6 +246,7 @@ void SetupWifi::stop() {
             g_dns_task = nullptr;
         }
         esp_wifi_stop();
+        ESP_LOGI(kTag, "Wi-Fi stopped");
     }
     active_ = false;
 }

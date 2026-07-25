@@ -11,11 +11,12 @@ namespace openwatts {
 
 class BleCyclingPowerService {
 public:
-    esp_err_t begin();
+    esp_err_t begin(const char *device_name);
     bool connected() const;
     void notify(const PowerSample &sample);
     void setDiagnostics(const char *text);
     void stop();
+    void resumeAdvertising();
 
     static int gapEvent(ble_gap_event *event, void *arg);
     static int gattAccess(uint16_t conn_handle, uint16_t attr_handle, ble_gatt_access_ctxt *ctxt, void *arg);
@@ -29,6 +30,7 @@ private:
 
     std::atomic<bool> connected_{false};
     std::atomic<uint16_t> conn_handle_{0};
+    char device_name_[19] = "OpenWatts";
 };
 
 }  // namespace openwatts

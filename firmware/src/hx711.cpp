@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "esp_rom_sys.h"
+#include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -15,6 +16,8 @@ portMUX_TYPE g_hx711_mux = portMUX_INITIALIZER_UNLOCKED;
 Hx711::Hx711(gpio_num_t dout, gpio_num_t sck) : dout_(dout), sck_(sck) {}
 
 esp_err_t Hx711::begin() {
+    gpio_deep_sleep_hold_dis();
+    gpio_hold_dis(sck_);
     gpio_config_t input{};
     input.pin_bit_mask = 1ULL << dout_;
     input.mode = GPIO_MODE_INPUT;
@@ -37,6 +40,18 @@ esp_err_t Hx711::begin() {
         return err;
     }
     gpio_set_level(sck_, 0);
+    return ESP_OK;
+}
+
+esp_err_t Hx711::prepareForSleep() {
+    ESP_RETURN_ON_ERROR(gpio_set_level(sck_, 1), "hx711", "PD_SCK high");
+    esp_rom_delay_us(100);
+    return ESP_OK;
+}
+
+esp_err_t Hx711::resumeFromSleep() {
+    ESP_RETURN_ON_ERROR(gpio_set_level(sck_, 0), "hx711", "PD_SCK low");
+    esp_rom_delay_us(100);
     return ESP_OK;
 }
 

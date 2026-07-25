@@ -15,7 +15,6 @@
 namespace openwatts {
 namespace {
 constexpr char kTag[] = "ble";
-constexpr char kDeviceName[] = "OpenWatts";
 constexpr uint16_t kCyclingPowerServiceUuid = 0x1818;
 constexpr uint16_t kCyclingPowerMeasurementUuid = 0x2A63;
 constexpr uint16_t kCyclingPowerFeatureUuid = 0x2A65;
@@ -95,8 +94,12 @@ const ble_gatt_svc_def gatt_services[] = {
 };
 }  // namespace
 
-esp_err_t BleCyclingPowerService::begin() {
+esp_err_t BleCyclingPowerService::begin(const char *device_name) {
     g_service = this;
+    if (device_name != nullptr && device_name[0] != '\0') {
+        std::strncpy(device_name_, device_name, sizeof(device_name_) - 1);
+        device_name_[sizeof(device_name_) - 1] = '\0';
+    }
 
     const int init_rc = nimble_port_init();
     if (init_rc != 0) {
@@ -106,7 +109,7 @@ esp_err_t BleCyclingPowerService::begin() {
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set(kDeviceName);
+    ble_svc_gap_device_name_set(device_name_);
     ble_hs_cfg.sync_cb = &BleCyclingPowerService::onSync;
 
     int rc = ble_gatts_count_cfg(gatt_services);
@@ -164,6 +167,10 @@ void BleCyclingPowerService::stop() {
     connected_.store(false, std::memory_order_relaxed);
 }
 
+void BleCyclingPowerService::resumeAdvertising() {
+    advertise();
+}
+
 int BleCyclingPowerService::gapEvent(ble_gap_event *event, void *arg) {
     return static_cast<BleCyclingPowerService *>(arg)->onGapEvent(event);
 }
@@ -193,8 +200,8 @@ void BleCyclingPowerService::hostTask(void *param) {
 void BleCyclingPowerService::advertise() {
     ble_hs_adv_fields fields{};
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = reinterpret_cast<const uint8_t *>(kDeviceName);
-    fields.name_len = std::strlen(kDeviceName);
+    fields.name = reinterpret_cast<const uint8_t *>(device_name_);
+    fields.name_len = std::strlen(device_name_);
     fields.name_is_complete = 1;
     fields.appearance = 0x0484;  // Cycling: Cycling Power Sensor.
     fields.appearance_is_present = 1;
