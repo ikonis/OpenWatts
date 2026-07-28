@@ -9,6 +9,8 @@
 
 namespace openwatts {
 
+void encodeCyclingPowerMeasurement(const PowerSample &sample, uint8_t payload[8]);
+
 class BleCyclingPowerService {
 public:
     esp_err_t begin(const char *device_name);

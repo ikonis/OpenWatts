@@ -3,3 +3,5 @@
 firmware/.pio/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
+__pycache__/
+*.pyc

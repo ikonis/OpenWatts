@@ -94,6 +94,20 @@ const ble_gatt_svc_def gatt_services[] = {
 };
 }  // namespace
 
+void encodeCyclingPowerMeasurement(const PowerSample &sample, uint8_t payload[8]) {
+    const uint16_t flags = 0x0020;
+    const int16_t safe_power = sample.valid && sample.power_watts > 0 ? sample.power_watts : 0;
+    const uint16_t encoded_power = static_cast<uint16_t>(safe_power);
+    payload[0] = static_cast<uint8_t>(flags & 0xFF);
+    payload[1] = static_cast<uint8_t>(flags >> 8);
+    payload[2] = static_cast<uint8_t>(encoded_power & 0xFF);
+    payload[3] = static_cast<uint8_t>((encoded_power >> 8) & 0xFF);
+    payload[4] = static_cast<uint8_t>(sample.cumulative_crank_revolutions & 0xFF);
+    payload[5] = static_cast<uint8_t>(sample.cumulative_crank_revolutions >> 8);
+    payload[6] = static_cast<uint8_t>(sample.last_crank_event_time & 0xFF);
+    payload[7] = static_cast<uint8_t>(sample.last_crank_event_time >> 8);
+}
+
 esp_err_t BleCyclingPowerService::begin(const char *device_name) {
     g_service = this;
     if (device_name != nullptr && device_name[0] != '\0') {
@@ -135,15 +149,7 @@ void BleCyclingPowerService::notify(const PowerSample &sample) {
     }
 
     uint8_t payload[8]{};
-    const uint16_t flags = 0x0020;  // Crank revolution data present.
-    payload[0] = static_cast<uint8_t>(flags & 0xFF);
-    payload[1] = static_cast<uint8_t>(flags >> 8);
-    payload[2] = static_cast<uint8_t>(sample.power_watts & 0xFF);
-    payload[3] = static_cast<uint8_t>((static_cast<uint16_t>(sample.power_watts) >> 8) & 0xFF);
-    payload[4] = static_cast<uint8_t>(sample.cumulative_crank_revolutions & 0xFF);
-    payload[5] = static_cast<uint8_t>(sample.cumulative_crank_revolutions >> 8);
-    payload[6] = static_cast<uint8_t>(sample.last_crank_event_time & 0xFF);
-    payload[7] = static_cast<uint8_t>(sample.last_crank_event_time >> 8);
+    encodeCyclingPowerMeasurement(sample, payload);
 
     os_mbuf *om = ble_hs_mbuf_from_flat(payload, sizeof(payload));
     if (om != nullptr) {

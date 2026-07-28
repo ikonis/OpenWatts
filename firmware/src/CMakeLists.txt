@@ -11,6 +11,10 @@ idf_component_register(
         "settings_storage.cpp"
         "setup_wifi.cpp"
         "self_test.cpp"
+        "runtime.cpp"
+        "battery_policy.cpp"
+        "report_policy.cpp"
+        "rotation.cpp"
     INCLUDE_DIRS "."
     REQUIRES bt driver esp_adc esp_event esp_http_server esp_netif esp_timer esp_wifi nvs_flash
 )

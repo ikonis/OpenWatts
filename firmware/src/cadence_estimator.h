@@ -19,6 +19,7 @@ public:
     void updateConfig(const DeviceConfig &config);
     CadenceState update(const ImuSample &sample, int64_t now_us);
     CadenceState latest() const;
+    void reset();
 
 private:
     DeviceConfig config_{};

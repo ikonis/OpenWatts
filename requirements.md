@@ -1,30 +1,27 @@
-# OpenWatts RevA Requirements
+# OpenWatts RevA requirements
+
+This document describes the fabricated RevA hardware. It does not authorize PCB
+changes.
 
 ## Functional
-- Measure left crank strain
-- BLE
-- Wi-Fi
-- Zigbee
-- USB programming
-- LiPo powered
-- USB charging
-- Battery voltage reporting
-- Charging status reporting
-- USB present detection
-- Wake from cadence
-- OTA updates
 
-## Mechanical
-- Max width: 35 mm
-- Minimize length
-- Zip-tie enclosure
-- USB accessible
-- Strain gauge connectors accessible
-- Hall pads (temporary)
-- JLCPCB assembly
+- Measure left-crank strain through HX711.
+- Advertise Bluetooth Cycling Power Service.
+- Use the fitted LSM6DS3 for motion wake and, after validation, cadence and
+  rotational information.
+- Provide USB-only maintenance Wi-Fi, configuration and OTA.
+- Provide optional, policy-controlled MQTT/Home Assistant battery reports.
+- Report battery voltage and charging/USB state.
+- Preserve calibration and credentials across firmware migration.
 
 ## Electrical
-- 3.3V system
-- HX711
-- ESP32-C6-MINI
-- Native USB
+
+- ESP32-C3-MINI-1-H4X, 3.3 V system.
+- Native USB on GPIO18/19.
+- HX711 DOUT/SCK on GPIO0/1.
+- LSM6DS3 over I2C GPIO6/7, INT on GPIO10.
+- USB present GPIO8, charge status GPIO5, battery ADC GPIO4.
+- GPIO10 is not RTC-capable on ESP32-C3; IMU wake therefore uses light sleep.
+
+Zigbee, ESP32-C6, Hall cadence and PCB redesign are not OpenWatts RevA
+requirements.

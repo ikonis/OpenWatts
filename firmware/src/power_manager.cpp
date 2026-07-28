@@ -64,8 +64,8 @@ esp_err_t PowerManager::enterSleep(BleCyclingPowerService &ble, SetupWifi &setup
     ESP_RETURN_ON_ERROR(hx711.resumeFromSleep(), kTag, "HX711 resume");
     ble.resumeAdvertising();
     last_wake_us_ = esp_timer_get_time();
-    ESP_LOGI(kTag, "light-sleep wake: causes=0x%08" PRIx32 " imu_source=0x%02x imu_int=%d usb=%d",
-             esp_sleep_get_wakeup_causes(), wake_source,
+    ESP_LOGI(kTag, "light-sleep wake: cause=%d imu_source=0x%02x imu_int=%d usb=%d",
+             static_cast<int>(esp_sleep_get_wakeup_cause()), wake_source,
              gpio_get_level(board::kImuInt), board::usbPresent() ? 1 : 0);
     return ESP_OK;
 }

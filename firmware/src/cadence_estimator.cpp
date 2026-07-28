@@ -42,4 +42,10 @@ CadenceState CadenceEstimator::latest() const {
     return latest_;
 }
 
+void CadenceEstimator::reset() {
+    latest_ = {};
+    armed_ = true;
+    previous_revolution_us_ = 0;
+}
+
 }  // namespace openwatts

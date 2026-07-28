@@ -13,9 +13,10 @@ constexpr char kNamespace[] = "openwatts";
 constexpr char kConfigKey[] = "config";
 
 DeviceConfig sanitized(DeviceConfig config) {
-    if (config.magic != DeviceConfig::kMagic || config.version != DeviceConfig::kVersion) {
+    if (config.magic != DeviceConfig::kMagic || config.version > DeviceConfig::kVersion) {
         return DeviceConfig{};
     }
+    config.version = DeviceConfig::kVersion;
     config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
     config.wifi_password[sizeof(config.wifi_password) - 1] = '\0';
     config.ble_device_name[sizeof(config.ble_device_name) - 1] = '\0';
@@ -44,6 +45,17 @@ DeviceConfig sanitized(DeviceConfig config) {
         std::min(config.mqtt_charge_now_percent, config.mqtt_charge_soon_percent);
     config.mqtt_critical_percent =
         std::min(config.mqtt_critical_percent, config.mqtt_charge_now_percent);
+    config.battery_voltage_scale = std::clamp(config.battery_voltage_scale, 0.1F, 10.0F);
+    config.battery_qualification_count = std::clamp<uint8_t>(config.battery_qualification_count, 1, 8);
+    config.battery_check_interval_seconds = std::clamp<uint32_t>(config.battery_check_interval_seconds, 60, 86400);
+    config.battery_heartbeat_interval_seconds =
+        std::clamp<uint32_t>(config.battery_heartbeat_interval_seconds, 300, 604800);
+    config.battery_report_voltage_delta = std::clamp(config.battery_report_voltage_delta, 0.005F, 0.25F);
+    config.usb_voltage_publish_delta = std::clamp(config.usb_voltage_publish_delta, 0.005F, 0.25F);
+    config.battery_report_retry_interval_seconds =
+        std::clamp<uint32_t>(config.battery_report_retry_interval_seconds, 60, 86400);
+    config.maximum_valid_power_watts = std::clamp<uint16_t>(config.maximum_valid_power_watts, 500, 5000);
+    config.power_filter_alpha = std::clamp(config.power_filter_alpha, 0.05F, 1.0F);
     return config;
 }
 }  // namespace
@@ -70,14 +82,28 @@ DeviceConfig SettingsStorage::load() {
         return config;
     }
 
-    size_t size = sizeof(config);
-    err = nvs_get_blob(handle, kConfigKey, &config, &size);
-    nvs_close(handle);
-    if (err != ESP_OK || size != sizeof(config)) {
-        ESP_LOGW(kTag, "config read failed or version changed; using defaults");
+    size_t size = 0;
+    err = nvs_get_blob(handle, kConfigKey, nullptr, &size);
+    if (err != ESP_OK || size < sizeof(uint32_t) * 2U || size > sizeof(config)) {
+        nvs_close(handle);
+        ESP_LOGW(kTag, "config blob has unsupported size %u; using defaults", static_cast<unsigned>(size));
         return DeviceConfig{};
     }
-    return sanitized(config);
+    DeviceConfig migrated{};
+    err = nvs_get_blob(handle, kConfigKey, &migrated, &size);
+    nvs_close(handle);
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "config read failed: %s", esp_err_to_name(err));
+        return DeviceConfig{};
+    }
+    const uint32_t stored_version = migrated.version;
+    config = sanitized(migrated);
+    if (config.magic != DeviceConfig::kMagic) return DeviceConfig{};
+    if (stored_version != DeviceConfig::kVersion) {
+        ESP_LOGI(kTag, "migrated config v%u to v%u without replacing stored credentials/calibration",
+                 static_cast<unsigned>(stored_version), static_cast<unsigned>(DeviceConfig::kVersion));
+    }
+    return config;
 }
 
 esp_err_t SettingsStorage::save(const DeviceConfig &config) {

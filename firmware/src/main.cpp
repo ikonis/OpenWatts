@@ -127,10 +127,18 @@ extern "C" void app_main() {
                      g_setup_wifi.active() ? 1 : 0);
         }
 
-        if (!current_usb_present && g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
+        // An active BLE consumer is riding activity even if cadence has paused.
+        // Begin the inactivity path only after the app disconnects.
+        if (!current_usb_present && !g_ble.connected() &&
+            g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu);
             if (sleep_err != ESP_OK) {
                 ESP_LOGW(kTag, "sleep/wake failed: %s", esp_err_to_name(sleep_err));
+            } else {
+                // A wake interrupt is motion, not a completed crank revolution.
+                // Require the cadence provider and power filter to reacquire.
+                g_cadence.reset();
+                g_power.reset();
             }
         }
         openwatts::board::setGreenLed(false);
