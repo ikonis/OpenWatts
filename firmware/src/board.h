@@ -49,6 +49,7 @@ uint32_t readBatteryMillivolts();
 bool usbPresent();
 bool chargeStatActive();
 bool bootButtonPressed();
+bool imuInterruptActive();
 void setGreenLed(bool on);
 
 }  // namespace openwatts::board

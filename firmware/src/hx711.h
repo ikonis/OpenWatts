@@ -27,6 +27,9 @@ private:
     bool ready_ = false;
     float filtered_ = 0.0F;
     float noise_estimate_ = 0.0F;
+    // Successful conversions add confidence; timeouts remove it.  This keeps
+    // a floating DOUT pin from being mistaken for a connected bridge.
+    int8_t signal_confidence_ = 0;
     uint32_t consecutive_failures_ = 0;
     uint32_t read_failures_ = 0;
 };

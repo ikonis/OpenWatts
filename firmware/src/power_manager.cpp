@@ -1,5 +1,6 @@
 #include "power_manager.h"
 
+#include <algorithm>
 #include <cinttypes>
 
 #include "ble_cycling_power.h"
@@ -20,6 +21,11 @@ constexpr char kTag[] = "power";
 
 void PowerManager::updateConfig(const DeviceConfig &config) {
     config_ = config;
+    // OpenWatts uses light sleep: GPIO10 (IMU INT) cannot deep-sleep wake an
+    // ESP32-C3.  A timer check is required for battery reporting while idle.
+    config_.wake_on_timer_enabled = true;
+    config_.wake_on_usb_enabled = true;
+    config_.timer_wake_seconds = std::max<uint32_t>(60, config.timer_wake_seconds);
 }
 
 bool PowerManager::shouldSleepForInactivity(const CadenceState &cadence, int64_t now_us) const {
@@ -38,7 +44,7 @@ bool PowerManager::shouldSleepForInactivity(const CadenceState &cadence, int64_t
 }
 
 esp_err_t PowerManager::enterSleep(BleCyclingPowerService &ble, SetupWifi &setup_wifi, Hx711 &hx711,
-                                   Lsm6ds3 &imu) const {
+                                   Lsm6ds3 &imu, WakeResult *wake_result) const {
     if (!config_.light_sleep_enabled) {
         return ESP_OK;
     }
@@ -60,10 +66,20 @@ esp_err_t PowerManager::enterSleep(BleCyclingPowerService &ble, SetupWifi &setup
 
     uint8_t wake_source = 0;
     ESP_RETURN_ON_ERROR(imu.clearWakeSource(&wake_source), kTag, "clear IMU wake");
+    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    last_wake_us_ = esp_timer_get_time();
+    if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+        // Do not reinitialize riding services. The caller performs a battery
+        // decision and either reports or returns straight to light sleep.
+        if (wake_result != nullptr) *wake_result = WakeResult::Timer;
+        ESP_LOGI(kTag, "light-sleep timer wake");
+        return ESP_OK;
+    }
+
     ESP_RETURN_ON_ERROR(imu.configureActiveMode(), kTag, "IMU active mode");
     ESP_RETURN_ON_ERROR(hx711.resumeFromSleep(), kTag, "HX711 resume");
     ble.resumeAdvertising();
-    last_wake_us_ = esp_timer_get_time();
+    if (wake_result != nullptr) *wake_result = WakeResult::MotionOrUsb;
     ESP_LOGI(kTag, "light-sleep wake: cause=%d imu_source=0x%02x imu_int=%d usb=%d",
              static_cast<int>(esp_sleep_get_wakeup_cause()), wake_source,
              gpio_get_level(board::kImuInt), board::usbPresent() ? 1 : 0);
@@ -75,7 +91,10 @@ esp_err_t PowerManager::configureLightSleepWakeSources() const {
     if (config_.wake_on_imu_enabled) {
         ESP_RETURN_ON_ERROR(gpio_wakeup_enable(board::kImuInt, GPIO_INTR_HIGH_LEVEL), kTag, "IMU GPIO wake");
     }
-    if (config_.wake_on_usb_enabled) {
+    // USB insertion is a wake source only when we entered sleep without USB.
+    // Enabling a high-level GPIO wake while USB is already present would make
+    // an intentional bench sleep return immediately.
+    if (config_.wake_on_usb_enabled && !board::usbPresent()) {
         ESP_RETURN_ON_ERROR(gpio_wakeup_enable(board::kUsbPresent, GPIO_INTR_HIGH_LEVEL), kTag, "USB GPIO wake");
     }
     ESP_RETURN_ON_ERROR(esp_sleep_enable_gpio_wakeup(), kTag, "GPIO light-sleep wake");

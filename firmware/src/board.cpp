@@ -1,11 +1,15 @@
 #include "board.h"
 
 #include "esp_adc/adc_oneshot.h"
+#include "esp_adc/adc_cali_scheme.h"
+
+#include <algorithm>
 
 namespace openwatts::board {
 namespace {
 i2c_master_bus_handle_t g_i2c_bus = nullptr;
 adc_oneshot_unit_handle_t g_adc = nullptr;
+adc_cali_handle_t g_adc_calibration = nullptr;
 }
 
 esp_err_t initPins() {
@@ -64,19 +68,49 @@ esp_err_t initBatteryAdc() {
     adc_oneshot_chan_cfg_t chan_cfg{};
     chan_cfg.bitwidth = ADC_BITWIDTH_DEFAULT;
     chan_cfg.atten = ADC_ATTEN_DB_12;
-    return adc_oneshot_config_channel(g_adc, ADC_CHANNEL_4, &chan_cfg);
+    err = adc_oneshot_config_channel(g_adc, ADC_CHANNEL_4, &chan_cfg);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    adc_cali_curve_fitting_config_t calibration_cfg{};
+    calibration_cfg.unit_id = ADC_UNIT_1;
+    calibration_cfg.chan = ADC_CHANNEL_4;
+    calibration_cfg.atten = ADC_ATTEN_DB_12;
+    // Curve fitting uses the ESP32-C3 ADC calibration data when available.
+    // A missing calibration scheme is handled as an invalid battery read.
+    return adc_cali_create_scheme_curve_fitting(&calibration_cfg, &g_adc_calibration);
 }
 
 uint32_t readBatteryMillivolts() {
-    if (g_adc == nullptr) {
+    if (g_adc == nullptr || g_adc_calibration == nullptr) {
         return 0;
     }
-    int raw = 0;
-    if (adc_oneshot_read(g_adc, ADC_CHANNEL_4, &raw) != ESP_OK) {
+
+    // The 100 kOhm / 100 kOhm divider is deliberately high impedance.  Take
+    // a compact burst and trim its extremes so dashboard and policy readings
+    // do not follow individual ADC conversion noise.
+    constexpr size_t kSamples = 15;
+    constexpr size_t kTrim = 3;
+    int millivolts[kSamples]{};
+    size_t valid = 0;
+    for (size_t i = 0; i < kSamples; ++i) {
+        int raw = 0;
+        int mv = 0;
+        if (adc_oneshot_read(g_adc, ADC_CHANNEL_4, &raw) == ESP_OK &&
+            adc_cali_raw_to_voltage(g_adc_calibration, raw, &mv) == ESP_OK) {
+            millivolts[valid++] = mv;
+        }
+    }
+    if (valid < (kTrim * 2U + 1U)) {
         return 0;
     }
-    // TODO: replace raw approximation with calibrated divider and eFuse ADC calibration.
-    return static_cast<uint32_t>((raw * 3300U) / 4095U);
+    std::sort(millivolts, millivolts + valid);
+    uint32_t total = 0;
+    for (size_t i = kTrim; i < valid - kTrim; ++i) {
+        total += static_cast<uint32_t>(millivolts[i]);
+    }
+    return total / static_cast<uint32_t>(valid - kTrim * 2U);
 }
 
 bool usbPresent() {
@@ -89,6 +123,10 @@ bool chargeStatActive() {
 
 bool bootButtonPressed() {
     return gpio_get_level(kBoot) == 0;
+}
+
+bool imuInterruptActive() {
+    return gpio_get_level(kImuInt) != 0;
 }
 
 void setGreenLed(bool on) {

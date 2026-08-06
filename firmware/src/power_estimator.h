@@ -24,6 +24,7 @@ struct PowerSample {
 enum class PowerRejectionReason : uint8_t {
     None,
     Hx711Unavailable,
+    CalibrationRequired,
     InvalidTorque,
     NegativeTorque,
     InvalidCadence,

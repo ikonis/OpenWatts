@@ -41,6 +41,27 @@ power limit is 2000 W and may be configured from 500–5000 W.
 BLE CPS instantaneous power is explicitly encoded as signed little-endian
 16-bit. Invalid or negative samples are emitted as zero and never wrap to 65536.
 
+## First-flash maintenance and Home Assistant bring-up
+
+With USB present, OpenWatts starts the `OpenWatts-Setup` access point at
+`192.168.4.1`. The setup page stores Wi-Fi credentials plus MQTT host, port,
+topic, and reporting enablement in NVS. Defaults are `192.168.1.28:1883` and
+`openwatts/battery`.
+
+Once Wi-Fi credentials are saved, the firmware keeps the setup AP available
+and joins the configured network as a station. MQTT reporting publishes a
+retained battery state and Home Assistant discovery for battery voltage,
+estimated battery, battery state, firmware version, and device health.
+
+`Keep Wi-Fi on without USB` is an explicit maintenance/calibration override.
+It defaults off. When enabled it deliberately keeps the AP and web interface
+available on battery; it increases battery consumption and does not alter the
+C3/IMU ride logic.
+
+This is a bring-up port, not evidence that the timer/report runtime has been
+physically validated on OpenWatts. Native USB or the J2 3.3 V UART header is
+required for the first flash.
+
 ## Build and test
 
 ```powershell

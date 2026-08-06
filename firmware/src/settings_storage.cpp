@@ -56,6 +56,10 @@ DeviceConfig sanitized(DeviceConfig config) {
         std::clamp<uint32_t>(config.battery_report_retry_interval_seconds, 60, 86400);
     config.maximum_valid_power_watts = std::clamp<uint16_t>(config.maximum_valid_power_watts, 500, 5000);
     config.power_filter_alpha = std::clamp(config.power_filter_alpha, 0.05F, 1.0F);
+    config.minimum_ride_duration_seconds =
+        std::clamp<uint16_t>(config.minimum_ride_duration_seconds, 30, 3600);
+    config.cadence_timeout_seconds = std::clamp<uint16_t>(config.cadence_timeout_seconds, 1, 60);
+    config.ble_advertising_power_dbm = std::clamp<int8_t>(config.ble_advertising_power_dbm, -20, 9);
     return config;
 }
 }  // namespace

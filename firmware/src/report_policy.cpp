@@ -7,7 +7,7 @@ namespace openwatts {
 ReportReason decideBatteryReport(const DeviceConfig &config, const BatteryReading &reading,
                                  BatteryState state, const ReportHistory &history,
                                  uint64_t now_seconds) {
-    if (!reading.valid || state == BatteryState::Critical || state == BatteryState::Protection) {
+    if (!reading.valid) {
         return ReportReason::None;
     }
     if (!history.has_success) return ReportReason::Boot;

@@ -60,6 +60,11 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
         reset();
         return latest_;
     }
+    if (!config_.strain_calibration_valid) {
+        reject(PowerRejectionReason::CalibrationRequired);
+        reset();
+        return latest_;
+    }
     if (!std::isfinite(latest_.torque_nm)) {
         reject(PowerRejectionReason::InvalidTorque);
         reset();
@@ -124,6 +129,7 @@ const char *PowerEstimator::rejectionName(PowerRejectionReason reason) {
     switch (reason) {
         case PowerRejectionReason::None: return "None";
         case PowerRejectionReason::Hx711Unavailable: return "HX711 unavailable";
+        case PowerRejectionReason::CalibrationRequired: return "Calibration required";
         case PowerRejectionReason::InvalidTorque: return "Invalid torque";
         case PowerRejectionReason::NegativeTorque: return "Negative torque";
         case PowerRejectionReason::InvalidCadence: return "Invalid cadence";

@@ -24,6 +24,7 @@ struct BatteryReading {
 class BatteryPolicy {
 public:
     explicit BatteryPolicy(const DeviceConfig &config);
+    void updateConfig(const DeviceConfig &config);
     BatteryState qualify(const BatteryReading &reading);
     BatteryState state() const;
     static const char *name(BatteryState state);

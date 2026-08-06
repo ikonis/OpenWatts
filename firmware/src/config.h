@@ -7,7 +7,7 @@ namespace openwatts {
 
 struct DeviceConfig {
     static constexpr uint32_t kMagic = 0x4F575454;  // OWTT
-    static constexpr uint32_t kVersion = 4;
+    static constexpr uint32_t kVersion = 7;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -19,12 +19,15 @@ struct DeviceConfig {
     // battery-protection shutdowns.
     bool light_sleep_enabled = true;
     bool deep_sleep_enabled = false;
-    bool wake_on_timer_enabled = false;
-    uint32_t timer_wake_seconds = 3600;
+    bool wake_on_timer_enabled = true;
+    uint32_t timer_wake_seconds = 300;
     bool wake_on_imu_enabled = true;
-    bool wake_on_usb_enabled = false;
+    bool wake_on_usb_enabled = true;
     bool wake_on_button_enabled = false;
     bool wifi_setup_on_usb = true;
+    // Explicit maintenance override for bring-up, calibration, and field
+    // service. Default false: battery operation otherwise stops Wi-Fi.
+    bool wifi_keep_alive_without_usb = false;
     bool force_setup_portal = false;
     bool run_self_test_on_boot = true;
     bool self_test_done = false;
@@ -45,6 +48,10 @@ struct DeviceConfig {
     uint8_t mqtt_critical_percent = 5;
     char wifi_ssid[33]{};
     char wifi_password[65]{};
+
+    // Append persisted fields only.  This preserves every prior field offset
+    // when a smaller NVS blob is loaded during firmware migration.
+    bool strain_calibration_valid = false;
 
     // Shared power-policy settings. Voltage is authoritative; percentage is
     // informational until the assembled board divider is validated.
@@ -67,6 +74,16 @@ struct DeviceConfig {
     // The threshold-crossing cadence provider is bring-up-only. Rotation-aware
     // power stays disabled until physical IMU axis/angle validation succeeds.
     bool rotation_aware_power_enabled = false;
+
+    // Configuration plumbing for product controls whose algorithms are not
+    // enabled yet. Append-only storage preserves all v6 field offsets.
+    bool debug_logging_enabled = false;
+    bool auto_ride_zero_enabled = false;
+    bool ride_detection_enabled = false;
+    uint16_t minimum_ride_duration_seconds = 180;
+    uint16_t cadence_timeout_seconds = 5;
+    int8_t ble_advertising_power_dbm = 0;
+    bool ble_auto_advertise_enabled = true;
 
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';

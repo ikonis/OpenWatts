@@ -90,12 +90,14 @@ void Hx711::observe(bool success, int32_t raw_value, float smoothing) {
     if (!success) {
         ++read_failures_;
         ++consecutive_failures_;
-        ready_ = consecutive_failures_ < 20 && has_filter_;
+        signal_confidence_ = std::max<int8_t>(0, static_cast<int8_t>(signal_confidence_ - 1));
+        ready_ = signal_confidence_ >= 6;
         return;
     }
 
     consecutive_failures_ = 0;
-    ready_ = true;
+    signal_confidence_ = std::min<int8_t>(12, static_cast<int8_t>(signal_confidence_ + 3));
+    ready_ = signal_confidence_ >= 6;
     const float raw = static_cast<float>(raw_value);
     if (!has_filter_) {
         filtered_ = raw;

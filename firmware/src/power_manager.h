@@ -15,9 +15,12 @@ class Lsm6ds3;
 
 class PowerManager {
 public:
+    enum class WakeResult : uint8_t { MotionOrUsb, Timer };
+
     void updateConfig(const DeviceConfig &config);
     bool shouldSleepForInactivity(const CadenceState &cadence, int64_t now_us) const;
-    esp_err_t enterSleep(BleCyclingPowerService &ble, SetupWifi &setup_wifi, Hx711 &hx711, Lsm6ds3 &imu) const;
+    esp_err_t enterSleep(BleCyclingPowerService &ble, SetupWifi &setup_wifi, Hx711 &hx711, Lsm6ds3 &imu,
+                         WakeResult *wake_result = nullptr) const;
 
 private:
     esp_err_t configureLightSleepWakeSources() const;

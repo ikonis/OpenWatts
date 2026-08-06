@@ -6,6 +6,13 @@ namespace openwatts {
 
 BatteryPolicy::BatteryPolicy(const DeviceConfig &config) : config_(config) {}
 
+void BatteryPolicy::updateConfig(const DeviceConfig &config) {
+    config_ = config;
+    state_ = BatteryState::Invalid;
+    candidate_ = BatteryState::Invalid;
+    candidate_count_ = 0;
+}
+
 BatteryState BatteryPolicy::classify(float voltage) const {
     if (voltage < 2.0F || voltage > 4.35F) return BatteryState::Invalid;
     if (voltage <= config_.battery_protection_voltage) return BatteryState::Protection;

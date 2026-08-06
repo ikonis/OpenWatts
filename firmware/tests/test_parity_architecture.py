@@ -113,6 +113,47 @@ class ParityArchitectureTests(unittest.TestCase):
         self.assertIn("kHx711Dout = GPIO_NUM_0", text)
         self.assertNotIn("GPIO_NUM_23", text)
 
+    def test_configuration_contract_is_persistent_and_transactional(self):
+        config = (SRC / "config.h").read_text()
+        storage = (SRC / "settings_storage.cpp").read_text()
+        web = (SRC / "setup_wifi.cpp").read_text()
+        self.assertIn("static constexpr uint32_t kVersion = 7", config)
+        for field in (
+            "debug_logging_enabled",
+            "auto_ride_zero_enabled",
+            "ride_detection_enabled",
+            "minimum_ride_duration_seconds",
+            "cadence_timeout_seconds",
+            "ble_advertising_power_dbm",
+            "ble_auto_advertise_enabled",
+        ):
+            self.assertIn(field, config)
+        self.assertIn("DeviceConfig candidate = current", web)
+        self.assertIn("storage()->save(candidate)", web)
+        self.assertIn("*g_portal->mutableConfig() = candidate", web)
+        self.assertIn("minimum_ride_duration_seconds", storage)
+
+    def test_settings_ui_only_enables_consumed_controls(self):
+        ui = (SRC / "web_ui.cpp").read_text()
+        for active in (
+            "name=ble_name",
+            "name=power_filter_alpha",
+            "name=maximum_valid_power_watts",
+            "name=ride_diagnostics",
+        ):
+            self.assertIn(active, ui)
+        for unsupported in (
+            "Automatic Ride Zero</label><p class=sub>Requires validated",
+            "Automatic ride detection</label><p class=sub>Requires ride-lifecycle",
+            "id=motionSensitivity disabled",
+            "id=debugLogging type=checkbox disabled",
+        ):
+            self.assertIn(unsupported, ui)
+
+    def test_ride_diagnostics_controls_runtime_logging(self):
+        main = (SRC / "main.cpp").read_text()
+        self.assertIn("if (g_config.ride_diagnostics_enabled)", main)
+
 
 if __name__ == "__main__":
     unittest.main()
