@@ -117,7 +117,8 @@ class ParityArchitectureTests(unittest.TestCase):
         config = (SRC / "config.h").read_text()
         storage = (SRC / "settings_storage.cpp").read_text()
         web = (SRC / "setup_wifi.cpp").read_text()
-        self.assertIn("static constexpr uint32_t kVersion = 7", config)
+        self.assertIn("static constexpr uint32_t kVersion = 10", config)
+        self.assertIn("OperatingMode operating_mode", config)
         for field in (
             "debug_logging_enabled",
             "auto_ride_zero_enabled",
@@ -153,6 +154,22 @@ class ParityArchitectureTests(unittest.TestCase):
     def test_ride_diagnostics_controls_runtime_logging(self):
         main = (SRC / "main.cpp").read_text()
         self.assertIn("if (g_config.ride_diagnostics_enabled)", main)
+
+    def test_operating_mode_is_the_user_policy_boundary(self):
+        policy = (SRC / "operating_mode.cpp").read_text()
+        main = (SRC / "main.cpp").read_text()
+        web = (SRC / "web_ui.cpp").read_text()
+        server = (SRC / "setup_wifi.cpp").read_text()
+        self.assertIn("OperatingMode::Maintenance", policy)
+        self.assertIn("usb_present ? 5U : 30U", policy)
+        self.assertIn("OperatingPolicy::permitsInactivitySleep", main)
+        self.assertIn("name=operating_mode", web)
+        self.assertIn("modebadge", web)
+        self.assertIn("switchOperatingMode('normal')", web)
+        self.assertIn("switchOperatingMode('maintenance')", web)
+        self.assertIn('uri = "/api/operating-mode"', server)
+        self.assertIn("operatingModeHandler", server)
+        self.assertNotIn("IMU Tuning Session", web)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,10 @@
 # Validation checklist
 
+Before first ride, confirm the calibration page reports an honest signal state,
+Manual Tare preserves permanent calibration, direction reversal preserves scale
+magnitude and zero, and IMU tuning requires Maintenance Mode and remains active
+until Normal Mode is selected. Then follow `INSTALLATION_CHECKLIST.md`.
+
 ## USB bench
 
 1. Confirm GPIO8 tracks USB present and GPIO5 charge status polarity.

@@ -3,11 +3,13 @@
 #include <cstdint>
 #include <cstring>
 
+#include "operating_mode.h"
+
 namespace openwatts {
 
 struct DeviceConfig {
     static constexpr uint32_t kMagic = 0x4F575454;  // OWTT
-    static constexpr uint32_t kVersion = 7;
+    static constexpr uint32_t kVersion = 10;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -25,9 +27,8 @@ struct DeviceConfig {
     bool wake_on_usb_enabled = true;
     bool wake_on_button_enabled = false;
     bool wifi_setup_on_usb = true;
-    // Explicit maintenance override for bring-up, calibration, and field
-    // service. Default false: battery operation otherwise stops Wi-Fi.
-    bool wifi_keep_alive_without_usb = false;
+    // Retained at its historical offset for v9-and-older NVS migration only.
+    bool legacy_wifi_keep_alive_without_usb = false;
     bool force_setup_portal = false;
     bool run_self_test_on_boot = true;
     bool self_test_done = false;
@@ -84,6 +85,31 @@ struct DeviceConfig {
     uint16_t cadence_timeout_seconds = 5;
     int8_t ble_advertising_power_dbm = 0;
     bool ble_auto_advertise_enabled = true;
+
+    // Permanent bench calibration and mutable in-service zero are deliberately
+    // separate. Automatic/runtime tare must never alter the permanent scale.
+    int32_t calibration_zero_reference_counts = 0;
+    int32_t runtime_zero_offset_counts = 0;
+    float calibration_mass_kg = 0.0F;
+    float calibration_lever_arm_mm = 0.0F;
+
+    // Installation-time IMU tuning scaffolding. Production rotation-aware
+    // power remains disabled until crank-mounted validation is complete.
+    uint16_t imu_accel_odr_hz = 104;
+    uint8_t imu_accel_range_g = 2;
+    uint16_t imu_gyro_odr_hz = 104;
+    uint16_t imu_gyro_range_dps = 500;
+    uint16_t imu_stationary_timeout_ms = 2000;
+    uint8_t rotation_confidence_threshold_percent = 80;
+    uint8_t minimum_cadence_rpm = 10;
+    uint8_t maximum_cadence_rpm = 220;
+    int8_t rotation_direction_convention = 1;
+    float crank_angle_reference_degrees = 0.0F;
+    // Former IMU tuning timeout. Retained only to preserve the append-only
+    // binary layout while loading older NVS blobs.
+    uint16_t reserved_legacy_imu_tuning_timeout_seconds = 900;
+
+    OperatingMode operating_mode = OperatingMode::Normal;
 
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';

@@ -2,6 +2,7 @@
 
 #include <atomic>
 
+#include "calibration.h"
 #include "config.h"
 #include "esp_err.h"
 
@@ -33,6 +34,17 @@ struct LiveStatus {
     int16_t power_watts = 0;
     uint32_t revolutions = 0;
     uint32_t hx711_failures = 0;
+    float hx711_noise = 0.0F;
+    float hx711_sample_rate_hz = 0.0F;
+    const char *wake_reason = "unknown";
+    const char *reset_reason = "unknown";
+    float provisional_angle_degrees = 0.0F;
+    float provisional_angular_velocity_dps = 0.0F;
+    float provisional_cadence_rpm = 0.0F;
+    uint32_t provisional_revolutions = 0;
+    float provisional_confidence = 0.0F;
+    const char *provisional_reason = "tuning_disabled";
+    bool motion_detected = false;
 };
 
 class SetupWifi {
@@ -47,6 +59,20 @@ public:
     LiveStatus liveStatus() const;
     void requestBenchLightSleep();
     bool consumeBenchLightSleepRequest();
+    void observeCalibration(bool attempted, bool success, int32_t raw, bool hx_ready, int64_t now_us);
+    CalibrationSnapshot calibrationSnapshot() const;
+    esp_err_t calibrationStart(double mass_kg, double lever_mm, bool reverse);
+    esp_err_t calibrationCaptureLoaded();
+    esp_err_t calibrationSave();
+    esp_err_t calibrationVerify();
+    esp_err_t calibrationTare();
+    esp_err_t calibrationReverse();
+    esp_err_t calibrationReset();
+    void calibrationDiscard();
+    void resetImuTracker();
+    bool consumeImuTrackerReset();
+    void setBridgeSignalConfirmed(bool confirmed);
+    bool bridgeSignalConfirmed() const;
 
 private:
     esp_err_t startHttpServer();
@@ -57,6 +83,9 @@ private:
     SettingsStorage *storage_ = nullptr;
     LiveStatus live_status_{};
     std::atomic<bool> bench_light_sleep_requested_{false};
+    std::atomic<bool> imu_tracker_reset_requested_{false};
+    std::atomic<bool> bridge_signal_confirmed_{false};
+    CalibrationManager calibration_{};
 };
 
 }  // namespace openwatts

@@ -22,6 +22,8 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "board.h"
+#include "logo_asset.h"
+#include "operating_mode.h"
 #include "settings_storage.h"
 #include "web_ui.h"
 
@@ -36,16 +38,18 @@ httpd_handle_t g_httpd = nullptr;
 TaskHandle_t g_dns_task = nullptr;
 SetupWifi *g_portal = nullptr;
 esp_timer_handle_t g_station_retry_timer = nullptr;
-// HTTPD_DEFAULT_CONFIG gives handlers a small task stack.  Keep the rendered
-// settings page in static storage: phones request it as part of captive-portal
-// probing, and a 2.6 KiB local page buffer overflowed that task's stack.
-char g_portal_page[9000]{};
-char g_status_json[4096]{};
+char g_status_json[7000]{};
 
 esp_err_t sendPage(httpd_req_t *req, const char *page) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+}
+
+esp_err_t logoHandler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "image/svg+xml; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    return httpd_resp_send(req, webui::kLogoSvg, HTTPD_RESP_USE_STRLEN);
 }
 
 void rebootAfterOta(void *) {
@@ -129,12 +133,6 @@ esp_err_t otaUploadHandler(httpd_req_t *req) {
 
 esp_err_t otaPageHandler(httpd_req_t *req) {
     return sendPage(req, webui::kOtaPage);
-    static constexpr char kPage[] =
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts OTA Update</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--good:#63d68b;--bad:#ef7676}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;align-items:center;gap:10px}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;overflow-x:auto;flex:1}a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}a:hover,a.active{background:#303030;color:var(--text)}main{padding-top:22px}.card{max-width:620px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}.sub{color:var(--muted);line-height:1.45}input{width:100%%;margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:8px;background:#121212;color:var(--text)}button{border:1px solid #555;background:#303030;color:var(--text);border-radius:9px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer}button:disabled{opacity:.55;cursor:wait}.result{margin-top:14px;padding:11px;border:1px solid var(--line);border-radius:9px;min-height:42px}.good{color:var(--good)}.bad{color:var(--bad)}progress{width:100%%;height:12px;margin-top:14px}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><nav><a href=/>Status</a><a href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a><a class=active href=/ota>OTA Update</a></nav></div></header><main><h1>Firmware Update</h1><section class=card><p class=sub>Available only while USB is connected. Select the PlatformIO <code>firmware.bin</code> file. The device validates the image, installs it, and restarts automatically.</p><input id=file type=file accept=.bin,application/octet-stream><button id=upload>Install Update</button><progress id=progress value=0 max=100 hidden></progress><div id=result class=result>Choose a firmware binary.</div></section><script>const f=document.querySelector('#file'),b=document.querySelector('#upload'),p=document.querySelector('#progress'),r=document.querySelector('#result');b.onclick=()=>{let x=f.files[0];if(!x){r.textContent='Choose a .bin firmware file first.';r.className='result bad';return}if(!x.name.toLowerCase().endsWith('.bin')||x.size<32||x.size>2*1024*1024){r.textContent='Select a valid firmware.bin under 2 MB.';r.className='result bad';return}b.disabled=true;p.hidden=false;p.value=0;r.textContent='Uploading '+x.name+'…';r.className='result';let q=new XMLHttpRequest();q.open('POST','/ota/upload');q.setRequestHeader('Content-Type','application/octet-stream');q.upload.onprogress=e=>{if(e.lengthComputable)p.value=Math.round(e.loaded/e.total*100)};q.onload=()=>{let ok=q.status>=200&&q.status<300;r.textContent=ok?'Update installed. Restarting now.':(q.responseText||'Update failed.');r.className='result '+(ok?'good':'bad');if(!ok)b.disabled=false};q.onerror=()=>{r.textContent='Upload connection failed.';r.className='result bad';b.disabled=false};q.send(x)}</script></main></body></html>";
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, kPage, HTTPD_RESP_USE_STRLEN);
 }
 
 void wifiEventLog(void *, esp_event_base_t event_base, int32_t event_id, void *event_data) {
@@ -242,7 +240,7 @@ esp_err_t benchSleepHandler(httpd_req_t *req) {
 esp_err_t benchHandler(httpd_req_t *req) {
     static constexpr char kPage[] =
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts Bench Test</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--amber:#e7c86c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;gap:4px;align-items:center}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;flex:1;overflow-x:auto}a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}a:hover,a.active{background:#303030;color:var(--text)}.card{max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}.sub{color:var(--muted)}button{border:1px solid #7b6830;background:#3b331d;color:var(--text);border-radius:9px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer}.result{margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:#121212}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><nav><a href=/>Status</a><a href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a><a class=active href=/bench>Bench Test</a></nav></div></header><main><h1>Bench Sleep Test</h1><section class=card><h2>IMU-armed light sleep</h2><p class=sub>This stops BLE, Wi-Fi, and HX711 sampling, then enters the same light sleep used for battery operation. Move the board to wake it. The dashboard should return after wake when USB or the Wi-Fi maintenance override is active.</p><button id=sleep>Enter Light Sleep</button><div class=result id=result>Ready.</div></section><script>sleep.onclick=async()=>{sleep.disabled=true;result.textContent='Requesting sleep...';try{let r=await fetch('/bench/sleep',{method:'POST'});let d=await r.json();result.textContent=d.message+' Move the board after the page disconnects.'}catch(e){result.textContent=e.message}setTimeout(()=>sleep.disabled=false,4000)}</script></main></body></html>";
+        "<title>OpenWatts Bench Test</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--amber:#e7c86c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;gap:4px;align-items:center}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;flex:1;overflow-x:auto}a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}a:hover,a.active{background:#303030;color:var(--text)}.card{max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}.sub{color:var(--muted)}button{border:1px solid #7b6830;background:#3b331d;color:var(--text);border-radius:9px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer}.result{margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:#121212}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><nav><a href=/>Status</a><a href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a><a class=active href=/bench>Bench Test</a></nav></div></header><main><h1>Bench Sleep Test</h1><section class=card><h2>IMU-armed light sleep</h2><p class=sub>This stops BLE, Wi-Fi, and HX711 sampling, then enters the same light sleep used for battery operation. Move the board to wake it. The dashboard should return after wake when USB is connected or Maintenance Mode is active.</p><button id=sleep>Enter Light Sleep</button><div class=result id=result>Ready.</div></section><script>sleep.onclick=async()=>{sleep.disabled=true;result.textContent='Requesting sleep...';try{let r=await fetch('/bench/sleep',{method:'POST'});let d=await r.json();result.textContent=d.message+' Move the board after the page disconnects.'}catch(e){result.textContent=e.message}setTimeout(()=>sleep.disabled=false,4000)}</script></main></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, kPage, HTTPD_RESP_USE_STRLEN);
@@ -250,30 +248,10 @@ esp_err_t benchHandler(httpd_req_t *req) {
 
 esp_err_t diagnosticsHandler(httpd_req_t *req) {
     return sendPage(req, webui::kDiagnosticsPage);
-    static constexpr char kPage[] =
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts Diagnostics</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;gap:10px;align-items:center}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;flex:1;overflow-x:auto}a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}a:hover,a.active{background:#303030;color:var(--text)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}.grid{display:grid;grid-template-columns:1fr;gap:12px}.sub,dt{color:var(--muted)}dl{display:grid;grid-template-columns:minmax(150px,1fr) auto;gap:9px 14px;margin:0}dd{margin:0;text-align:right;font-weight:650}@media(min-width:700px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><nav><a href=/>Status</a><a href=/settings>Settings</a><a class=active href=/diagnostics>Diagnostics</a><a href=/ota>OTA Update</a></nav></div></header><main><h1>Diagnostics</h1><p class=sub>Live hardware bring-up data. Values refresh once per second.</p><section class=grid><section class=card><h2>Battery & USB</h2><dl><dt>Battery voltage</dt><dd id=voltage>--</dd><dt>Battery estimate</dt><dd id=battery>--</dd><dt>USB present</dt><dd id=usb>--</dd><dt>Charge status</dt><dd id=charging>--</dd></dl></section><section class=card><h2>IMU</h2><dl><dt>WHO_AM_I</dt><dd id=who>--</dd><dt>Interrupt line</dt><dd id=interrupt>--</dd><dt>Accelerometer X / Y / Z</dt><dd id=accel>--</dd><dt>Gyro X / Y / Z</dt><dd id=gyro>--</dd><dt>Detected revolutions</dt><dd id=revs>--</dd></dl></section><section class=card><h2>HX711</h2><dl><dt>Connection</dt><dd id=hx>--</dd><dt>Raw counts</dt><dd id=raw>--</dd><dt>Filtered counts</dt><dd id=filtered>--</dd><dt>Read failures</dt><dd id=failures>--</dd></dl></section><section class=card><h2>Runtime</h2><dl><dt>Uptime</dt><dd id=uptime>--</dd><dt>BLE</dt><dd id=ble>--</dd><dt>Wi-Fi override</dt><dd id=wifi>--</dd><dt>Calibration</dt><dd id=cal>--</dd></dl></section></section><script>const p=id=>document.getElementById(id),f=(v,n=2)=>Number(v).toFixed(n);function refresh(){fetch('/status',{cache:'no-store'}).then(r=>r.json()).then(s=>{p('voltage').textContent=s.battery_valid?f(s.battery_voltage)+' V':'Unavailable';p('battery').textContent=s.battery_valid?s.battery_percent+'%':'--';p('usb').textContent=s.usb?'Connected':'Disconnected';p('charging').textContent=s.charging?'Active':'Inactive';p('who').textContent='0x'+s.imu_whoami.toString(16).padStart(2,'0');p('interrupt').textContent=s.imu_interrupt?'High':'Low';p('accel').textContent=s.accel.map(v=>f(v,3)+' g').join(' / ');p('gyro').textContent=s.gyro.map(v=>f(v,1)+' dps').join(' / ');p('revs').textContent=s.revolutions;p('hx').textContent=s.hx?'Detected':'Unavailable';p('raw').textContent=s.raw;p('filtered').textContent=f(s.filtered);p('failures').textContent=s.failures;p('uptime').textContent=Math.floor(s.uptime/3600)+'h '+Math.floor(s.uptime%3600/60)+'m';p('ble').textContent=s.ble?'Connected':'Advertising';p('wifi').textContent=s.wifi_battery?'Battery override on':'USB only';p('cal').textContent=s.calibrated?'Valid':'Not calibrated';}).catch(()=>{})}refresh();setInterval(refresh,1000)</script></main></body></html>";
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, kPage, HTTPD_RESP_USE_STRLEN);
 }
-
-[[maybe_unused]] esp_err_t modernSettingsHandler(httpd_req_t *req);
 
 esp_err_t settingsHandler(httpd_req_t *req) {
     return sendPage(req, webui::kSettingsPage);
-    const DeviceConfig *config = g_portal != nullptr ? g_portal->mutableConfig() : nullptr;
-    if (config == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "settings unavailable");
-    std::snprintf(g_portal_page, sizeof(g_portal_page),
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts Settings</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:760px;margin:auto;padding:13px 14px}.bar{display:flex;gap:14px;align-items:center}.brand{font-size:20px;font-weight:800;margin-right:auto}a{color:var(--muted);text-decoration:none;padding:9px;border-radius:8px}a:hover,a.active{background:#303030;color:var(--text)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}h1{font-size:25px}h2{font-size:17px;margin:0 0 8px}.sub{color:var(--muted)}label{display:block;color:var(--muted);margin:14px 0 5px}input{width:100%%;border:1px solid #505050;background:#121212;color:var(--text);border-radius:8px;padding:11px;font:inherit}.check{display:flex;align-items:center;gap:9px;color:var(--text)}.check input{width:auto}button{border:1px solid #555;background:#303030;color:var(--text);border-radius:9px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer;margin-top:14px}.result{margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:#121212;white-space:pre-wrap}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><a href=/>Status</a><a class=active href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a></div></header><main><h1>Settings</h1><p class=sub>Changes apply immediately and are retained on the device.</p><form class=card method=post action=/save><h2>Network</h2><label>Wi-Fi network</label><input name=ssid value='%s' maxlength=32><label>Password</label><input name=password type=password maxlength=64><label class=check><input type=checkbox name=wifi_battery%s> Keep Wi-Fi on without USB</label><p class=sub>Maintenance override; keeps the dashboard available on battery.</p><h2>MQTT</h2><label class=check><input type=checkbox name=mqtt_enabled%s> Enable MQTT battery reporting</label><label>Broker</label><input name=mqtt_host value='%s' maxlength=63><label>Port</label><input name=mqtt_port value='%u' inputmode=numeric><label>Topic</label><input name=mqtt_topic value='%s' maxlength=95><h2>Sleep</h2><label class=check><input type=checkbox name=sleep%s> Motion-wake sleep enabled</label><label>Inactivity delay, ms</label><input name=timeout value='%u' inputmode=numeric><button type=submit>Save Settings</button></form></main></body></html>",
-        config->wifi_ssid, config->wifi_keep_alive_without_usb ? " checked" : "",
-        config->mqtt_battery_notifications_enabled ? " checked" : "", config->mqtt_host,
-        static_cast<unsigned>(config->mqtt_port), config->mqtt_topic,
-        config->light_sleep_enabled ? " checked" : "", static_cast<unsigned>(config->inactivity_timeout_ms));
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, g_portal_page, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t ensureWifiInitialized() {
@@ -316,71 +294,36 @@ esp_err_t ensureWifiInitialized() {
     return ESP_OK;
 }
 
-[[maybe_unused]] esp_err_t modernStatusHandler(httpd_req_t *req);
-
 esp_err_t rootHandler(httpd_req_t *req) {
     return sendPage(req, webui::kStatusPage);
-    const DeviceConfig *config = g_portal != nullptr ? g_portal->mutableConfig() : nullptr;
-    if (config == nullptr) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
-    }
-    std::snprintf(g_portal_page, sizeof(g_portal_page),
-        "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts</title><style>body{font:16px system-ui;margin:0;background:#111827;color:#e5e7eb}main{max-width:760px;margin:auto;padding:18px}h1{margin:.1em 0}.sub{color:#9ca3af}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.card,form{background:#1f2937;border:1px solid #374151;border-radius:10px;padding:13px;margin:14px 0}.label{color:#9ca3af;font-size:.8em;text-transform:uppercase}.value{font-size:1.25em;font-weight:650;margin-top:4px}label{display:block;margin:10px 0}input{box-sizing:border-box;width:100%%;padding:8px;margin-top:4px;border-radius:6px;border:1px solid #4b5563;background:#111827;color:#fff}input[type=checkbox]{width:auto}button{padding:9px 14px;border:0;border-radius:7px;background:#d1d5db;color:#111827;font-weight:650}</style></head><body><main><h1>OpenWatts</h1><div class='sub'>USB bring-up dashboard / <span id='uptime'>--</span></div><section class='grid'>"
-        "<div class='card'><div class='label'>Power</div><div class='value' id='power'>-- W</div></div><div class='card'><div class='label'>Cadence</div><div class='value' id='cadence'>-- RPM</div></div><div class='card'><div class='label'>Torque</div><div class='value' id='torque'>-- Nm</div></div><div class='card'><div class='label'>Battery</div><div class='value' id='battery'>--</div></div><div class='card'><div class='label'>USB / charge</div><div class='value' id='usb'>--</div></div><div class='card'><div class='label'>Connections</div><div class='value' id='links'>--</div></div><div class='card'><div class='label'>HX711</div><div class='value' id='hx'>--</div></div><div class='card'><div class='label'>IMU</div><div class='value' id='imu'>--</div></div></section><div class='card'><div class='label'>Raw sensor data</div><div id='raw'>--</div></div>"
-        "<script>function up(){fetch('/status').then(r=>r.json()).then(s=>{uptime.textContent='Uptime: '+Math.floor(s.uptime/3600)+'h '+Math.floor(s.uptime%%3600/60)+'m';power.textContent=s.calibrated?s.power+' W':'--';cadence.textContent=s.cadence.toFixed(1)+' RPM';torque.textContent=s.calibrated?s.torque.toFixed(2)+' Nm':'Not calibrated';battery.textContent=s.battery_valid?s.battery_voltage.toFixed(2)+' V / '+s.battery_percent+'%%':'Unavailable';usb.textContent=s.usb?'USB connected'+(s.charging?' / charging':''):'Battery';links.textContent='Wi-Fi active'+(s.wifi_battery?' / battery override on':'')+' / BLE '+(s.ble?'connected':'advertising');hx.textContent=s.hx?'Detected':'Unavailable';imu.textContent=s.imu?'Ready':'Not ready';raw.textContent=s.hx?'HX711 raw '+s.raw+' / filtered '+s.filtered.toFixed(1)+' / failures '+s.failures+' / revolutions '+s.revolutions:'No stable HX711 signal / read failures '+s.failures;})}up();setInterval(up,1000)</script>"
-        "<form method='post' action='/save'><h2>Network & settings</h2>"
-        "<label>Wi-Fi SSID <input name='ssid' value='%s' maxlength='32'></label><br>"
-        "<label>Password <input name='password' type='password' maxlength='64'></label><br>"
-        "<label><input type='checkbox' name='wifi_battery'%s> Keep Wi-Fi on without USB</label><br>"
-        "<h2>Battery reporting</h2>"
-        "<label><input type='checkbox' name='mqtt_enabled'%s> Enable MQTT battery reporting</label><br>"
-        "<label>MQTT broker <input name='mqtt_host' value='%s' maxlength='63'></label><br>"
-        "<label>MQTT port <input name='mqtt_port' value='%u' inputmode='numeric'></label><br>"
-        "<label>MQTT topic <input name='mqtt_topic' value='%s' maxlength='95'></label><br>"
-        "<h2>Power</h2><label><input type='checkbox' name='sleep'%s> Motion-wake sleep enabled</label><br>"
-        "<label>Inactivity timeout ms (5000 minimum) <input name='timeout' value='%u'></label><br>"
-        "<button type='submit'>Save</button></form>"
-        "<p><a href='/selftest'>Self-test status</a></p></body></html>",
-        config->wifi_ssid, config->wifi_keep_alive_without_usb ? " checked" : "",
-        config->mqtt_battery_notifications_enabled ? " checked" : "", config->mqtt_host,
-        static_cast<unsigned>(config->mqtt_port), config->mqtt_topic,
-        config->light_sleep_enabled ? " checked" : "", static_cast<unsigned>(config->inactivity_timeout_ms));
-    httpd_resp_set_type(req, "text/html");
-    return httpd_resp_send(req, g_portal_page, HTTPD_RESP_USE_STRLEN);
-}
-
-[[maybe_unused]] esp_err_t modernStatusHandler(httpd_req_t *req) {
-    static constexpr char kPage[] =
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts Status</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--green:#63d68b}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;z-index:3;background:#151515f2;border-bottom:1px solid var(--line);backdrop-filter:blur(10px)}.bar{max-width:1100px;margin:auto;padding:13px 14px;display:flex;align-items:center;gap:10px}.brand{font-size:20px;font-weight:800;margin-right:6px}.uptime{color:var(--muted);font-size:12px;font-style:italic;text-align:right}nav{display:flex;gap:4px;overflow-x:auto;flex:1}nav a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}nav a.active,nav a:hover{background:#303030;color:var(--text)}main{max-width:1100px;margin:auto;padding:18px 14px 48px}.title{display:flex;justify-content:space-between;align-items:end;gap:12px;margin-bottom:16px}.title h1{margin:0;font-size:25px}.title small,.sub{color:var(--muted)}.grid{display:grid;grid-template-columns:1fr;gap:12px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}.card h2{font-size:17px;margin:0 0 14px}.hero{font-size:38px;font-weight:800}dl{display:grid;grid-template-columns:minmax(130px,1fr) auto;gap:9px 14px;margin:0}dt{color:var(--muted)}dd{margin:0;text-align:right;font-weight:650}.good{color:var(--green)}@media(min-width:700px){.bar,main{padding-left:18px;padding-right:18px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.title h1{font-size:28px}}</style></head><body><header><div class=bar><div class=brand>OpenWatts</div><nav><a class=active href=/>Status</a><a href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a></nav><span class=uptime id=uptime>Uptime: --</span></div></header><main><div class=title><h1>Device Status</h1><small>USB bring-up firmware</small></div><div class=grid><section class=card><h2>Power</h2><div class=hero id=power>--</div><div class=sub><span id=cadence>--</span> RPM / <span id=torque>--</span> Nm</div></section><section class=card><h2>Battery</h2><div class=hero id=battery>--</div><div class=sub id=voltage>Waiting for measurement</div></section><section class=card><h2>Connections</h2><dl><dt>USB</dt><dd id=usb>--</dd><dt>Wi-Fi</dt><dd id=wifi>--</dd><dt>Bluetooth</dt><dd id=ble>--</dd></dl></section><section class=card><h2>Sensor Health</h2><dl><dt>IMU</dt><dd id=imu>--</dd><dt>HX711</dt><dd id=hx>--</dd><dt>Calibration</dt><dd id=cal>--</dd></dl></section></div><script>const p=id=>document.getElementById(id);function up(){fetch('/status',{cache:'no-store'}).then(r=>r.json()).then(s=>{let h=Math.floor(s.uptime/3600),m=Math.floor(s.uptime%3600/60),x=Math.floor(s.uptime%60);p('uptime').textContent='Uptime: '+h+'h '+m+'m '+x+'s';p('power').textContent=s.calibrated?s.power+' W':'--';p('cadence').textContent=s.cadence.toFixed(1);p('torque').textContent=s.calibrated?s.torque.toFixed(2):'Not calibrated';p('battery').textContent=s.battery_valid?s.battery_percent+'%':'Unavailable';p('voltage').textContent=s.battery_valid?s.battery_voltage.toFixed(2)+' V':'Battery measurement unavailable';p('usb').textContent=s.usb?'Connected':'Disconnected';p('wifi').textContent='Active'+(s.wifi_battery?' / battery override':'');p('ble').textContent=s.ble?'Connected':'Advertising';p('imu').textContent=s.imu?'Ready':'Not ready';p('hx').textContent=s.hx?'Detected':'Unavailable';p('cal').textContent=s.calibrated?'Valid':'Not calibrated';})}up();setInterval(up,1000)</script></main></body></html>";
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, kPage, HTTPD_RESP_USE_STRLEN);
-}
-
-[[maybe_unused]] esp_err_t modernSettingsHandler(httpd_req_t *req) {
-    const DeviceConfig *config = g_portal != nullptr ? g_portal->mutableConfig() : nullptr;
-    if (config == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "settings unavailable");
-    std::snprintf(g_portal_page, sizeof(g_portal_page),
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>OpenWatts Settings</title>"
-        "<style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--good:#63d68b}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;align-items:center;gap:10px}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;flex:1;overflow-x:auto}nav a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}nav a:hover,nav a.active{background:#303030;color:var(--text)}.uptime{font-size:12px;font-style:italic;color:var(--muted)}.card{max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}h1{font-size:25px}h2{font-size:17px}.sub,label{color:var(--muted)}label{display:block;margin:14px 0 5px}input{width:100%%;padding:11px;border-radius:8px;border:1px solid #505050;background:#121212;color:var(--text);font:inherit}.check{display:flex;gap:9px;align-items:center;color:var(--text)}.check input{width:auto}button{margin-top:14px;padding:12px 14px;border:1px solid #555;border-radius:9px;background:#303030;color:var(--text);font:inherit;font-weight:700}.result{margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:9px}.ok{color:var(--good)}</style></head><body><header><div class=bar><div class=brand>OpenWatts</div><nav><a href=/>Status</a><a class=active href=/settings>Settings</a><a href=/diagnostics>Raw Data</a><a href=/ota>OTA</a></nav><span class=uptime id=up>Uptime: --</span></div></header><main><h1>Settings</h1><p class=sub>Changes apply immediately and are retained on the device.</p><form id=form class=card><h2>Network</h2><label>Wi-Fi network</label><input name=ssid value='%s' maxlength=32><label>Password</label><input name=password type=password maxlength=64><label class=check><input type=checkbox name=wifi_battery%s> Keep Wi-Fi on without USB</label><h2>MQTT</h2><label class=check><input type=checkbox name=mqtt_enabled%s> Enable MQTT battery reporting</label><label>Broker</label><input name=mqtt_host value='%s'><label>Port</label><input name=mqtt_port value='%u'><label>Topic</label><input name=mqtt_topic value='%s'><h2>Sleep</h2><label class=check><input type=checkbox name=sleep%s> IMU motion-wake sleep enabled</label><label>Inactivity delay, ms</label><input name=timeout value='%u'><button>Save Settings</button><div class=result id=result>Ready.</div></form><script>const f=document.getElementById('form'),r=document.getElementById('result');f.onsubmit=async e=>{e.preventDefault();r.textContent='Saving…';let q=await fetch('/save',{method:'POST',body:new URLSearchParams(new FormData(f))});r.textContent=q.ok?'✓ Settings applied':await q.text();r.className='result '+(q.ok?'ok':'')};setInterval(()=>fetch('/status').then(x=>x.json()).then(s=>up.textContent='Uptime: '+Math.floor(s.uptime/3600)+'h '+Math.floor(s.uptime%%60)+'m'),1000)</script></main></body></html>",
-        config->wifi_ssid, config->wifi_keep_alive_without_usb ? " checked" : "", config->mqtt_battery_notifications_enabled ? " checked" : "", config->mqtt_host, static_cast<unsigned>(config->mqtt_port), config->mqtt_topic, config->light_sleep_enabled ? " checked" : "", static_cast<unsigned>(config->inactivity_timeout_ms));
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, g_portal_page, HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t statusHandler(httpd_req_t *req) {
     if (g_portal == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
     const LiveStatus s = g_portal->liveStatus();
     const DeviceConfig &c = *g_portal->mutableConfig();
+    const CalibrationSnapshot cal = g_portal->calibrationSnapshot();
+    const char *signal = !s.hx711_ready ? "signal_unavailable" :
+                         std::abs(s.raw_counts) >= 8388000 ? "saturated_output" :
+                         s.hx711_noise > 6000 ? "signal_unstable" :
+                         c.strain_calibration_valid ? "calibrated" : "signal_present_not_calibrated";
     std::snprintf(g_status_json, sizeof(g_status_json),
                   "{\"uptime\":%u,\"battery_voltage\":%.3f,\"battery_percent\":%u,\"battery_valid\":%s,"
-                  "\"usb\":%s,\"charging\":%s,\"wifi_battery\":%s,\"ble\":%s,\"imu\":%s,\"imu_interrupt\":%s,\"imu_whoami\":%u,"
+                  "\"usb\":%s,\"charging\":%s,\"operating_mode\":\"%s\",\"ble\":%s,\"imu\":%s,\"imu_interrupt\":%s,\"imu_whoami\":%u,"
                   "\"accel\":[%.3f,%.3f,%.3f],\"gyro\":[%.2f,%.2f,%.2f],\"hx\":%s,\"calibrated\":%s,\"raw\":%ld,"
                   "\"filtered\":%.2f,\"torque\":%.3f,\"cadence\":%.2f,\"power\":%d,\"revolutions\":%u,\"failures\":%u,"
-                   "\"config\":{\"wifi_ssid\":\"%s\",\"wifi_keep_alive_without_usb\":%s,"
+                  "\"hx711_noise\":%.2f,\"hx711_sample_rate_hz\":%.2f,\"strain_signal\":\"%s\","
+                  "\"maintenance_tools\":%s,"
+                  "\"wake_reason\":\"%s\",\"reset_reason\":\"%s\","
+                  "\"motion_detected\":%s,\"provisional_angle_degrees\":%.2f,"
+                  "\"provisional_angular_velocity_dps\":%.2f,\"provisional_cadence_rpm\":%.2f,"
+                  "\"provisional_revolutions\":%u,\"provisional_confidence\":%.3f,"
+                  "\"provisional_reason\":\"%s\","
+                  "\"calibration\":{\"step\":\"%s\",\"result\":\"%s\",\"error\":\"%s\",\"active\":%s,\"valid\":%s,"
+                  "\"mass_kg\":%.4f,\"lever_arm_mm\":%.2f,\"reference_torque_nm\":%.4f,\"raw_delta\":%.2f,"
+                  "\"counts_per_nm\":%.4f,\"nm_per_count\":%.9f,\"verification_torque_nm\":%.4f,\"verification_error_percent\":%.2f,"
+                  "\"zero_samples\":%u,\"loaded_samples\":%u,\"zero_noise\":%.2f,\"loaded_noise\":%.2f},"
+                   "\"config\":{\"wifi_ssid\":\"%s\",\"operating_mode\":\"%s\","
                    "\"mqtt_enabled\":%s,\"mqtt_host\":\"%s\",\"mqtt_port\":%u,\"mqtt_topic\":\"%s\","
                    "\"light_sleep_enabled\":%s,\"inactivity_timeout_ms\":%u,\"ble_device_name\":\"%s\","
                    "\"ride_diagnostics_enabled\":%s,\"debug_logging_enabled\":%s,"
@@ -389,11 +332,13 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    "\"minimum_ride_duration_seconds\":%u,\"cadence_timeout_seconds\":%u,"
                    "\"imu_wake_threshold\":%u,\"imu_revolution_threshold_dps\":%.1f,"
                    "\"rotation_aware_power_enabled\":%s,\"ble_advertising_power_dbm\":%d,"
-                   "\"ble_auto_advertise_enabled\":%s,\"zero_offset\":%ld,\"counts_per_nm\":%.3f}}",
+                   "\"ble_auto_advertise_enabled\":%s,\"zero_offset\":%ld,\"calibration_zero\":%ld,"
+                   "\"counts_per_nm\":%.3f,\"torque_sign\":%ld,\"calibration_mass_kg\":%.4f,"
+                   "\"calibration_lever_arm_mm\":%.2f}}",
                   static_cast<unsigned>(s.uptime_seconds), static_cast<double>(s.battery_voltage),
                   static_cast<unsigned>(s.battery_percent), s.battery_valid ? "true" : "false",
                   s.usb_present ? "true" : "false", s.charging ? "true" : "false",
-                  g_portal->mutableConfig()->wifi_keep_alive_without_usb ? "true" : "false", s.ble_connected ? "true" : "false",
+                  OperatingPolicy::value(c.operating_mode), s.ble_connected ? "true" : "false",
                   s.imu_ready ? "true" : "false", s.imu_interrupt_active ? "true" : "false",
                   static_cast<unsigned>(s.imu_who_am_i), static_cast<double>(s.imu_accel_g[0]),
                   static_cast<double>(s.imu_accel_g[1]), static_cast<double>(s.imu_accel_g[2]),
@@ -402,7 +347,18 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   s.strain_calibration_valid ? "true" : "false", static_cast<long>(s.raw_counts),
                   static_cast<double>(s.filtered_counts), static_cast<double>(s.torque_nm), static_cast<double>(s.cadence_rpm),
                   static_cast<int>(s.power_watts), static_cast<unsigned>(s.revolutions), static_cast<unsigned>(s.hx711_failures),
-                   c.wifi_ssid, c.wifi_keep_alive_without_usb ? "true" : "false",
+                  static_cast<double>(s.hx711_noise), static_cast<double>(s.hx711_sample_rate_hz), signal,
+                  OperatingPolicy::permitsMaintenanceTools(c) ? "true" : "false", s.wake_reason, s.reset_reason,
+                  s.motion_detected ? "true" : "false", static_cast<double>(s.provisional_angle_degrees),
+                  static_cast<double>(s.provisional_angular_velocity_dps),
+                  static_cast<double>(s.provisional_cadence_rpm), static_cast<unsigned>(s.provisional_revolutions),
+                  static_cast<double>(s.provisional_confidence), s.provisional_reason,
+                  CalibrationManager::stepName(cal.step), cal.result, cal.error, cal.active ? "true" : "false",
+                  cal.valid ? "true" : "false", cal.mass_kg, cal.lever_arm_mm, cal.reference_torque_nm,
+                  cal.raw_delta, cal.counts_per_nm, cal.nm_per_count, cal.verification_torque_nm,
+                  cal.verification_error_percent, static_cast<unsigned>(cal.zero.count),
+                  static_cast<unsigned>(cal.loaded.count), cal.zero.standardDeviation(), cal.loaded.standardDeviation(),
+                   c.wifi_ssid, OperatingPolicy::value(c.operating_mode),
                    c.mqtt_battery_notifications_enabled ? "true" : "false", c.mqtt_host,
                    static_cast<unsigned>(c.mqtt_port), c.mqtt_topic,
                    c.light_sleep_enabled ? "true" : "false", static_cast<unsigned>(c.inactivity_timeout_ms),
@@ -416,7 +372,10 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    c.rotation_aware_power_enabled ? "true" : "false",
                    static_cast<int>(c.ble_advertising_power_dbm),
                    c.ble_auto_advertise_enabled ? "true" : "false",
-                   static_cast<long>(c.zero_offset_counts), static_cast<double>(c.counts_per_nm));
+                   static_cast<long>(c.runtime_zero_offset_counts),
+                   static_cast<long>(c.calibration_zero_reference_counts), static_cast<double>(c.counts_per_nm),
+                   static_cast<long>(c.torque_sign), static_cast<double>(c.calibration_mass_kg),
+                   static_cast<double>(c.calibration_lever_arm_mm));
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, g_status_json, HTTPD_RESP_USE_STRLEN);
@@ -429,6 +388,88 @@ esp_err_t selfTestHandler(httpd_req_t *req) {
 
 esp_err_t calibrationHandler(httpd_req_t *req) {
     return sendPage(req, webui::kCalibrationPage);
+}
+
+std::string requestBody(httpd_req_t *req) {
+    std::string body(static_cast<size_t>(req->content_len), '\0');
+    int received = 0;
+    while (received < req->content_len) {
+        const int got = httpd_req_recv(req, body.data() + received, req->content_len - received);
+        if (got <= 0) return {};
+        received += got;
+    }
+    return body;
+}
+
+esp_err_t actionResponse(httpd_req_t *req, esp_err_t err, const char *success) {
+    httpd_resp_set_type(req, "application/json");
+    if (err != ESP_OK) {
+        httpd_resp_set_status(req, err == ESP_ERR_INVALID_ARG ? "400 Bad Request" : "409 Conflict");
+        std::snprintf(g_status_json, sizeof(g_status_json),
+                      "{\"ok\":false,\"message\":\"%s\"}", esp_err_to_name(err));
+        return httpd_resp_sendstr(req, g_status_json);
+    }
+    std::snprintf(g_status_json, sizeof(g_status_json), "{\"ok\":true,\"message\":\"%s\"}", success);
+    return httpd_resp_sendstr(req, g_status_json);
+}
+
+esp_err_t calibrationStartHandler(httpd_req_t *req) {
+    const std::string body = requestBody(req);
+    if (!g_portal->bridgeSignalConfirmed()) return actionResponse(req, ESP_ERR_INVALID_STATE, "");
+    float mass = 0, lever = 0;
+    if (!parseFloat(formValue(body, "mass_kg"), .01F, 200.F, mass) ||
+        !parseFloat(formValue(body, "lever_mm"), 10.F, 1000.F, lever)) return actionResponse(req, ESP_ERR_INVALID_ARG, "");
+    return actionResponse(req, g_portal->calibrationStart(mass, lever, formValue(body, "reverse") == "1"), "Unloaded capture started");
+}
+esp_err_t calibrationLoadHandler(httpd_req_t *req) { return actionResponse(req, g_portal->calibrationCaptureLoaded(), "Loaded capture started"); }
+esp_err_t calibrationSaveHandler(httpd_req_t *req) { return actionResponse(req, g_portal->calibrationSave(), "Calibration saved"); }
+esp_err_t calibrationVerifyHandler(httpd_req_t *req) { return actionResponse(req, g_portal->calibrationVerify(), "Verification capture started"); }
+esp_err_t calibrationTareHandler(httpd_req_t *req) { return actionResponse(req, g_portal->calibrationTare(), "Runtime zero updated"); }
+esp_err_t calibrationReverseHandler(httpd_req_t *req) { return actionResponse(req, g_portal->calibrationReverse(), "Torque direction reversed"); }
+esp_err_t calibrationDiscardHandler(httpd_req_t *req) { g_portal->calibrationDiscard(); return actionResponse(req, ESP_OK, "Calibration session discarded"); }
+esp_err_t calibrationResetHandler(httpd_req_t *req) {
+    const std::string body = requestBody(req);
+    if (formValue(body, "confirm") != "RESET") return actionResponse(req, ESP_ERR_INVALID_ARG, "");
+    return actionResponse(req, g_portal->calibrationReset(), "Saved calibration reset");
+}
+esp_err_t imuResetHandler(httpd_req_t *req) { g_portal->resetImuTracker(); return actionResponse(req, ESP_OK, "Provisional tracker reset"); }
+esp_err_t bridgeConfirmHandler(httpd_req_t *req) {
+    g_portal->setBridgeSignalConfirmed(formValue(requestBody(req), "confirmed") == "1");
+    return actionResponse(req, ESP_OK, g_portal->bridgeSignalConfirmed() ? "Physical signal confirmed" : "Physical confirmation cleared");
+}
+
+esp_err_t operatingModeHandler(httpd_req_t *req) {
+    if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
+    }
+
+    const std::string requested_mode = formValue(requestBody(req), "mode");
+    if (requested_mode != "normal" && requested_mode != "maintenance") {
+        return badSetting(req, "Select Normal or Maintenance operating mode");
+    }
+
+    DeviceConfig candidate = *g_portal->mutableConfig();
+    candidate.operating_mode = requested_mode == "maintenance"
+                                   ? OperatingMode::Maintenance
+                                   : OperatingMode::Normal;
+    const esp_err_t err = g_portal->storage()->save(candidate);
+    if (err != ESP_OK) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    const char *message = candidate.operating_mode == OperatingMode::Maintenance
+                              ? "Maintenance Mode active"
+                              : "Normal Mode active";
+    char response_body[96]{};
+    std::snprintf(response_body, sizeof(response_body),
+                  "{\"ok\":true,\"operating_mode\":\"%s\",\"message\":\"%s\"}",
+                  OperatingPolicy::value(candidate.operating_mode), message);
+    const esp_err_t response = httpd_resp_sendstr(req, response_body);
+    // Apply only after acknowledging the request. On battery, Normal Mode is
+    // then free to close the web server without truncating this response.
+    *g_portal->mutableConfig() = candidate;
+    return response;
 }
 
 esp_err_t saveHandler(httpd_req_t *req) {
@@ -497,7 +538,11 @@ esp_err_t saveHandler(httpd_req_t *req) {
     candidate.wifi_ssid[sizeof(candidate.wifi_ssid) - 1] = '\0';
     candidate.wifi_password[sizeof(candidate.wifi_password) - 1] = '\0';
     candidate.light_sleep_enabled = body.find("sleep=on") != std::string::npos;
-    candidate.wifi_keep_alive_without_usb = body.find("wifi_battery=on") != std::string::npos;
+    const std::string operating_mode = formValue(body, "operating_mode");
+    if (operating_mode != "normal" && operating_mode != "maintenance") {
+        return badSetting(req, "Select Normal or Maintenance operating mode");
+    }
+    candidate.operating_mode = operating_mode == "maintenance" ? OperatingMode::Maintenance : OperatingMode::Normal;
     candidate.mqtt_battery_notifications_enabled = mqtt_enabled;
     if (!mqtt_host.empty()) std::strncpy(candidate.mqtt_host, mqtt_host.c_str(), sizeof(candidate.mqtt_host) - 1);
     if (!mqtt_topic.empty()) std::strncpy(candidate.mqtt_topic, mqtt_topic.c_str(), sizeof(candidate.mqtt_topic) - 1);
@@ -519,9 +564,11 @@ esp_err_t saveHandler(httpd_req_t *req) {
     if (err != ESP_OK) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
     }
-    *g_portal->mutableConfig() = candidate;
     httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":true,\"reboot_required\":true,\"message\":\"Settings saved\"}");
+    const esp_err_t response = httpd_resp_sendstr(
+        req, "{\"ok\":true,\"reboot_required\":true,\"message\":\"Settings saved\"}");
+    *g_portal->mutableConfig() = candidate;
+    return response;
 }
 
 void dnsTask(void *arg) {
@@ -585,7 +632,7 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
     config_ = &config;
     storage_ = &storage;
 
-    if (!usb_present && !config.wifi_keep_alive_without_usb && !allow_battery_reporting) {
+    if (!OperatingPolicy::permitsWifi(config, usb_present, allow_battery_reporting)) {
         ESP_LOGI(kTag, "USB absent; Wi-Fi remains off");
         return ESP_OK;
     }
@@ -637,7 +684,8 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
         ESP_RETURN_ON_ERROR(startDnsRedirect(), kTag, "dns redirect");
         ESP_LOGW(kTag, "setup portal active: SSID=%s, URL=http://192.168.4.1/", kSetupSsid);
     } else {
-        ESP_LOGI(kTag, "USB maintenance: joining saved Wi-Fi as a station");
+        ESP_LOGI(kTag, "%s Mode: joining saved Wi-Fi as a station",
+                 OperatingPolicy::name(config.operating_mode));
     }
 
     active_ = true;
@@ -688,6 +736,44 @@ bool SetupWifi::consumeBenchLightSleepRequest() {
     return bench_light_sleep_requested_.exchange(false);
 }
 
+void SetupWifi::observeCalibration(bool attempted, bool success, int32_t raw, bool hx_ready, int64_t now_us) {
+    calibration_.observe(attempted, success, raw, hx_ready, now_us,
+                         config_ && OperatingPolicy::permitsMaintenanceTools(*config_));
+}
+CalibrationSnapshot SetupWifi::calibrationSnapshot() const { return calibration_.snapshot(); }
+esp_err_t SetupWifi::calibrationStart(double mass, double lever, bool reverse) { return calibration_.start(mass, lever, reverse, esp_timer_get_time(), config_ && OperatingPolicy::permitsMaintenanceTools(*config_), live_status_.hx711_ready); }
+esp_err_t SetupWifi::calibrationCaptureLoaded() { return calibration_.captureLoaded(esp_timer_get_time(), config_ && OperatingPolicy::permitsMaintenanceTools(*config_), live_status_.hx711_ready); }
+esp_err_t SetupWifi::calibrationSave() {
+    if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;
+    DeviceConfig candidate = *config_;
+    ESP_RETURN_ON_ERROR(calibration_.apply(candidate), kTag, "apply calibration");
+    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save calibration");
+    *config_ = candidate; return ESP_OK;
+}
+esp_err_t SetupWifi::calibrationVerify() { return calibration_.verify(esp_timer_get_time(), config_ && OperatingPolicy::permitsMaintenanceTools(*config_), live_status_.hx711_ready); }
+esp_err_t SetupWifi::calibrationTare() {
+    if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;
+    DeviceConfig candidate = *config_;
+    ESP_RETURN_ON_ERROR(calibration_.manualTare(candidate, live_status_.hx711_ready, live_status_.filtered_counts, live_status_.hx711_noise), kTag, "tare");
+    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save tare"); *config_ = candidate; return ESP_OK;
+}
+esp_err_t SetupWifi::calibrationReverse() {
+    if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;
+    DeviceConfig candidate = *config_;
+    ESP_RETURN_ON_ERROR(calibration_.reverseDirection(candidate), kTag, "reverse");
+    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save reverse"); *config_ = candidate; return ESP_OK;
+}
+esp_err_t SetupWifi::calibrationReset() {
+    if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;
+    DeviceConfig candidate = *config_; calibration_.resetCalibration(candidate);
+    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "reset calibration"); *config_ = candidate; return ESP_OK;
+}
+void SetupWifi::calibrationDiscard() { calibration_.discard(); }
+void SetupWifi::resetImuTracker() { imu_tracker_reset_requested_.store(true); }
+bool SetupWifi::consumeImuTrackerReset() { return imu_tracker_reset_requested_.exchange(false); }
+void SetupWifi::setBridgeSignalConfirmed(bool confirmed) { bridge_signal_confirmed_.store(confirmed && config_ && OperatingPolicy::permitsMaintenanceTools(*config_)); }
+bool SetupWifi::bridgeSignalConfirmed() const { return bridge_signal_confirmed_.load() && config_ && OperatingPolicy::permitsMaintenanceTools(*config_); }
+
 esp_err_t SetupWifi::startHttpServer() {
     if (g_httpd != nullptr) {
         return ESP_OK;
@@ -695,11 +781,13 @@ esp_err_t SetupWifi::startHttpServer() {
     g_portal = this;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 13;
+    cfg.max_uri_handlers = 24;
     ESP_RETURN_ON_ERROR(httpd_start(&g_httpd, &cfg), kTag, "httpd_start");
 
     httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = rootHandler, .user_ctx = nullptr};
+    httpd_uri_t logo{.uri = "/assets/openwatts-logo.svg", .method = HTTP_GET, .handler = logoHandler, .user_ctx = nullptr};
     httpd_uri_t save{.uri = "/save", .method = HTTP_POST, .handler = saveHandler, .user_ctx = nullptr};
+    httpd_uri_t operating_mode{.uri = "/api/operating-mode", .method = HTTP_POST, .handler = operatingModeHandler, .user_ctx = nullptr};
     httpd_uri_t selftest{.uri = "/selftest", .method = HTTP_GET, .handler = selfTestHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
@@ -709,8 +797,20 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t bench_sleep{.uri = "/bench/sleep", .method = HTTP_POST, .handler = benchSleepHandler, .user_ctx = nullptr};
     httpd_uri_t ota_page{.uri = "/ota", .method = HTTP_GET, .handler = otaPageHandler, .user_ctx = nullptr};
     httpd_uri_t ota_upload{.uri = "/ota/upload", .method = HTTP_POST, .handler = otaUploadHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_start{.uri = "/api/calibration/start", .method = HTTP_POST, .handler = calibrationStartHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_load{.uri = "/api/calibration/load", .method = HTTP_POST, .handler = calibrationLoadHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_save{.uri = "/api/calibration/save", .method = HTTP_POST, .handler = calibrationSaveHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_verify{.uri = "/api/calibration/verify", .method = HTTP_POST, .handler = calibrationVerifyHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_tare{.uri = "/api/calibration/tare", .method = HTTP_POST, .handler = calibrationTareHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_reverse{.uri = "/api/calibration/reverse", .method = HTTP_POST, .handler = calibrationReverseHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_discard{.uri = "/api/calibration/discard", .method = HTTP_POST, .handler = calibrationDiscardHandler, .user_ctx = nullptr};
+    httpd_uri_t cal_reset{.uri = "/api/calibration/reset", .method = HTTP_POST, .handler = calibrationResetHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_reset{.uri = "/api/imu-reset", .method = HTTP_POST, .handler = imuResetHandler, .user_ctx = nullptr};
+    httpd_uri_t bridge_confirm{.uri = "/api/calibration/confirm-signal", .method = HTTP_POST, .handler = bridgeConfirmHandler, .user_ctx = nullptr};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &root), kTag, "root handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &logo), kTag, "logo handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &operating_mode), kTag, "operating mode handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &selftest), kTag, "selftest handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");
@@ -720,6 +820,16 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bench_sleep), kTag, "bench sleep handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ota_page), kTag, "ota page handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ota_upload), kTag, "ota upload handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_start), kTag, "cal start");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_load), kTag, "cal load");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_save), kTag, "cal save");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_verify), kTag, "cal verify");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_tare), kTag, "cal tare");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_reverse), kTag, "cal reverse");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_discard), kTag, "cal discard");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_reset), kTag, "cal reset");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_reset), kTag, "imu reset");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bridge_confirm), kTag, "bridge confirm");
     return ESP_OK;
 }
 

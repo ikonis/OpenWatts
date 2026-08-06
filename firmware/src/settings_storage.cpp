@@ -1,6 +1,7 @@
 #include "settings_storage.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "esp_log.h"
@@ -15,6 +16,14 @@ constexpr char kConfigKey[] = "config";
 DeviceConfig sanitized(DeviceConfig config) {
     if (config.magic != DeviceConfig::kMagic || config.version > DeviceConfig::kVersion) {
         return DeviceConfig{};
+    }
+    const uint32_t stored_version = config.version;
+    if (stored_version < 10) {
+        config.operating_mode = config.legacy_wifi_keep_alive_without_usb
+            ? OperatingMode::Maintenance : OperatingMode::Normal;
+    }
+    if (config.operating_mode != OperatingMode::Normal && config.operating_mode != OperatingMode::Maintenance) {
+        config.operating_mode = OperatingMode::Normal;
     }
     config.version = DeviceConfig::kVersion;
     config.wifi_ssid[sizeof(config.wifi_ssid) - 1] = '\0';
@@ -60,6 +69,20 @@ DeviceConfig sanitized(DeviceConfig config) {
         std::clamp<uint16_t>(config.minimum_ride_duration_seconds, 30, 3600);
     config.cadence_timeout_seconds = std::clamp<uint16_t>(config.cadence_timeout_seconds, 1, 60);
     config.ble_advertising_power_dbm = std::clamp<int8_t>(config.ble_advertising_power_dbm, -20, 9);
+    config.minimum_cadence_rpm = std::clamp<uint8_t>(config.minimum_cadence_rpm, 1, 120);
+    config.maximum_cadence_rpm = std::clamp<uint8_t>(config.maximum_cadence_rpm, config.minimum_cadence_rpm, 250);
+    config.rotation_confidence_threshold_percent =
+        std::clamp<uint8_t>(config.rotation_confidence_threshold_percent, 1, 100);
+    config.imu_stationary_timeout_ms = std::clamp<uint16_t>(config.imu_stationary_timeout_ms, 250, 30000);
+    if (!std::isfinite(config.counts_per_nm) || config.counts_per_nm <= 0.0F) {
+        config.strain_calibration_valid = false;
+        config.counts_per_nm = 10000.0F;
+    }
+    if (config.strain_calibration_valid && config.runtime_zero_offset_counts == 0 && config.zero_offset_counts != 0) {
+        config.calibration_zero_reference_counts = config.zero_offset_counts;
+        config.runtime_zero_offset_counts = config.zero_offset_counts;
+    }
+    config.zero_offset_counts = config.runtime_zero_offset_counts;
     return config;
 }
 }  // namespace

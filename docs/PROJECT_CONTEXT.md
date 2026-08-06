@@ -1,5 +1,11 @@
 # OpenWatts project context
 
+Installation-preparation state: Bench Calibration, Manual Tare, direction
+reversal, verification and reset are implemented but await the strain bridge.
+Maintenance Mode keeps Wi-Fi, WebUI, calibration, raw data, and provisional IMU
+tuning available on battery without affecting production BLE or power data.
+Automatic Ride Zero and rotation-aware power remain disabled.
+
 OpenWatts is the ESP32-C3/LSM6DS3 successor to the ESP32-C6/Hall-based
 ikoniWatts prototype. Shared behavior should remain mirrored at the policy
 level, not copied at the GPIO or sensor-driver level.

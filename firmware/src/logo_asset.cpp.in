@@ -1,0 +1,7 @@
+#include "logo_asset.h"
+
+namespace openwatts::webui {
+
+const char kLogoSvg[] = R"OWSVG(@OPENWATTS_LOGO_SVG@)OWSVG";
+
+}  // namespace openwatts::webui

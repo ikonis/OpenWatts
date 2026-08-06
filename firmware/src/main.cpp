@@ -9,6 +9,8 @@
 #include "cadence_estimator.h"
 #include "config.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -16,6 +18,7 @@
 #include "imu_lsm6ds3.h"
 #include "mqtt_notifier.h"
 #include "nvs_flash.h"
+#include "operating_mode.h"
 #include "power_estimator.h"
 #include "power_manager.h"
 #include "report_policy.h"
@@ -47,6 +50,28 @@ bool g_battery_display_initialized = false;
 float g_battery_display_voltage = 0.0F;
 float g_battery_percent_reference_voltage = 0.0F;
 uint8_t g_battery_display_percent = 0;
+float g_provisional_angle = 0.0F;
+float g_provisional_total_degrees = 0.0F;
+uint32_t g_provisional_revolutions = 0;
+int64_t g_last_provisional_imu_us = 0;
+
+const char *wakeReason() {
+    switch (esp_sleep_get_wakeup_cause()) {
+        case ESP_SLEEP_WAKEUP_TIMER: return "timer";
+        case ESP_SLEEP_WAKEUP_GPIO: return "motion_or_usb";
+        case ESP_SLEEP_WAKEUP_UNDEFINED: return "power_on";
+        default: return "other";
+    }
+}
+const char *resetReason() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON: return "power_on";
+        case ESP_RST_SW: return "software";
+        case ESP_RST_WDT: case ESP_RST_TASK_WDT: return "watchdog";
+        case ESP_RST_BROWNOUT: return "brownout";
+        default: return "other";
+    }
+}
 
 uint8_t estimateBatteryPercent(float voltage) {
     struct Point { float voltage; uint8_t percent; };
@@ -115,7 +140,8 @@ bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::Bat
                   static_cast<unsigned>(battery.estimated_percent),
                   openwatts::BatteryPolicy::name(state), battery.valid ? "true" : "false",
                   usb_present ? "true" : "false",
-                  usb_present ? "USB Maintenance" : "Battery Report",
+                  openwatts::OperatingPolicy::isMaintenance(g_config) ? "Maintenance" :
+                      (usb_present ? "Normal / USB" : "Battery Report"),
                   openwatts::reportReasonName(reason));
     const esp_err_t mqtt_err = g_mqtt.begin(g_config.mqtt_host, g_config.mqtt_port, g_config.mqtt_topic,
                                             g_mqtt_payload, g_mqtt_discovery_pending);
@@ -156,6 +182,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(g_settings.begin());
     g_config = g_settings.load();
+    ESP_LOGI(kTag, "Operating Mode: %s", openwatts::OperatingPolicy::name(g_config.operating_mode));
 
     ESP_ERROR_CHECK(openwatts::board::initPins());
     ESP_ERROR_CHECK(openwatts::board::initI2c());
@@ -235,7 +262,7 @@ extern "C" void app_main() {
             }
 
             if (!g_mqtt.running()) {
-                if (!timer_usb_present && !g_config.wifi_keep_alive_without_usb) g_setup_wifi.stop();
+                if (!openwatts::OperatingPolicy::permitsWifi(g_config, timer_usb_present)) g_setup_wifi.stop();
                 openwatts::PowerManager::WakeResult wake_result{};
                 const esp_err_t sleep_err = g_power_manager.enterSleep(
                     g_ble, g_setup_wifi, g_hx711, g_imu, &wake_result);
@@ -258,12 +285,20 @@ extern "C" void app_main() {
 
         const int64_t now_us = esp_timer_get_time();
         const bool current_usb_present = openwatts::board::usbPresent();
+        g_setup_wifi.observeCalibration(true, hx_ok, raw_counts, g_hx711.ready(), now_us);
+        if (g_setup_wifi.consumeImuTrackerReset()) {
+            g_cadence.reset();
+            g_provisional_angle = 0.0F;
+            g_provisional_total_degrees = 0.0F;
+            g_provisional_revolutions = 0;
+            g_last_provisional_imu_us = now_us;
+        }
         if (g_setup_wifi.consumeBenchLightSleepRequest()) {
             ESP_LOGI(kTag, "bench request: entering IMU-armed light sleep");
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu);
             if (sleep_err != ESP_OK) {
                 ESP_LOGW(kTag, "bench light sleep failed: %s", esp_err_to_name(sleep_err));
-            } else if (current_usb_present || g_config.wifi_keep_alive_without_usb) {
+            } else if (openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
                 const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, current_usb_present, false);
                 if (wifi_err != ESP_OK) ESP_LOGW(kTag, "Wi-Fi restore after bench wake failed: %s", esp_err_to_name(wifi_err));
             }
@@ -281,13 +316,46 @@ extern "C" void app_main() {
                 if (wifi_err != ESP_OK) {
                     ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
                 }
-            } else if (!g_config.wifi_keep_alive_without_usb) {
+            } else if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
                 g_setup_wifi.stop();
             } else {
-                ESP_LOGI(kTag, "USB removed; keeping Wi-Fi active by explicit configuration");
+                ESP_LOGI(kTag, "USB removed; Maintenance Mode keeps Wi-Fi and WebUI active");
             }
         }
+        // A Settings save can change Operating Mode without a USB edge.
+        // Honor Normal Mode promptly after the response has been delivered.
+        if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) &&
+            g_setup_wifi.active() && !g_mqtt.running()) {
+            g_setup_wifi.stop();
+        }
         const openwatts::CadenceState cadence = g_cadence.update(imu_sample, now_us);
+        float provisional_velocity = 0.0F;
+        float provisional_cadence = 0.0F;
+        float provisional_confidence = 0.0F;
+        const char *provisional_reason = "maintenance_required";
+        bool motion_detected = false;
+        if (openwatts::OperatingPolicy::permitsMaintenanceTools(g_config) && imu_sample.valid) {
+            const float gx = std::fabs(imu_sample.gyro_dps[0]);
+            const float gy = std::fabs(imu_sample.gyro_dps[1]);
+            const float gz = std::fabs(imu_sample.gyro_dps[2]);
+            provisional_velocity = gx >= gy && gx >= gz ? imu_sample.gyro_dps[0] : gy >= gz ? imu_sample.gyro_dps[1] : imu_sample.gyro_dps[2];
+            motion_detected = std::fabs(provisional_velocity) >= 5.0F;
+            const float dt = g_last_provisional_imu_us > 0 ? static_cast<float>(now_us - g_last_provisional_imu_us) / 1000000.0F : 0.0F;
+            g_last_provisional_imu_us = now_us;
+            if (dt > 0 && dt < 0.25F) {
+                const float step = provisional_velocity * dt;
+                g_provisional_angle = std::fmod(g_provisional_angle + step + 360.0F, 360.0F);
+                g_provisional_total_degrees += std::fabs(step);
+                g_provisional_revolutions = static_cast<uint32_t>(g_provisional_total_degrees / 360.0F);
+            }
+            provisional_cadence = std::fabs(provisional_velocity) / 6.0F;
+            provisional_confidence = motion_detected ? std::min(0.75F, std::fabs(provisional_velocity) / 360.0F) : 0.0F;
+            provisional_reason = motion_detected ? "axis_not_validated" : "stationary";
+        } else if (openwatts::OperatingPolicy::permitsMaintenanceTools(g_config)) {
+            provisional_reason = "imu_unavailable";
+        }
+        // Web calibration may update scale/direction/zero without reboot.
+        g_power.updateConfig(g_config);
         const openwatts::PowerSample sample = g_power.update(raw_counts, g_hx711.filtered(), g_hx711.noiseEstimate(),
                                                              g_hx711.ready(), cadence);
         if (now_us - last_status_battery_us >= 1000LL * 1000LL) {
@@ -307,6 +375,15 @@ extern "C" void app_main() {
             .raw_counts = sample.raw_counts, .filtered_counts = sample.filtered_counts, .torque_nm = sample.torque_nm,
             .cadence_rpm = sample.cadence_rpm, .power_watts = sample.power_watts,
             .revolutions = cadence.revolutions, .hx711_failures = g_hx711.readFailures(),
+            .hx711_noise = g_hx711.noiseEstimate(),
+            .hx711_sample_rate_hz = g_config.sample_interval_ms ? 1000.0F / g_config.sample_interval_ms : 0.0F,
+            .wake_reason = wakeReason(), .reset_reason = resetReason(),
+            .provisional_angle_degrees = g_provisional_angle,
+            .provisional_angular_velocity_dps = provisional_velocity,
+            .provisional_cadence_rpm = provisional_cadence,
+            .provisional_revolutions = g_provisional_revolutions,
+            .provisional_confidence = provisional_confidence,
+            .provisional_reason = provisional_reason, .motion_detected = motion_detected,
         });
 
         // Reporting is independent from battery sampling.  It can wake the
@@ -314,18 +391,22 @@ extern "C" void app_main() {
         // dashboard change.
         if (g_mqtt.running() && g_mqtt.complete()) {
             finishBatteryReport(status_battery, g_battery_policy.state(), now_us);
-            if (!current_usb_present && !g_config.wifi_keep_alive_without_usb) {
+            if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
                 g_setup_wifi.stop();
             }
         }
-        if (now_us - last_battery_policy_check_us >=
-            static_cast<int64_t>(current_usb_present ? 5U : g_config.battery_check_interval_seconds) * 1000000LL) {
+        if (now_us - last_battery_policy_check_us >= static_cast<int64_t>(
+                openwatts::OperatingPolicy::mqttEvaluationIntervalSeconds(g_config, current_usb_present)) * 1000000LL) {
             last_battery_policy_check_us = now_us;
             const openwatts::BatteryState state = g_battery_policy.qualify(status_battery);
             openwatts::ReportReason reason = g_pending_report_reason;
             if (reason == openwatts::ReportReason::None) {
                 reason = openwatts::decideBatteryReport(g_config, status_battery, state, g_report_history,
                                                         static_cast<uint64_t>(now_us / 1000000LL));
+            }
+            if (reason == openwatts::ReportReason::None &&
+                openwatts::OperatingPolicy::isMaintenance(g_config)) {
+                reason = openwatts::ReportReason::Manual;
             }
             if (!g_mqtt.running() && reason != openwatts::ReportReason::None &&
                 g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled) {
@@ -358,10 +439,9 @@ extern "C" void app_main() {
 
         // An active BLE consumer is riding activity even if cadence has paused.
         // Begin the inactivity path only after the app disconnects.
-        // The explicit battery Wi-Fi override is a maintenance mode.  Keeping
-        // Wi-Fi alive also requires keeping the runtime awake; entering light
+        // Maintenance deliberately keeps the runtime awake; entering light
         // sleep would immediately tear down the web server and radio.
-        if (!current_usb_present && !g_config.wifi_keep_alive_without_usb && !g_ble.connected() &&
+        if (openwatts::OperatingPolicy::permitsInactivitySleep(g_config) && !current_usb_present && !g_ble.connected() &&
             g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
             openwatts::PowerManager::WakeResult wake_result{};
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu, &wake_result);

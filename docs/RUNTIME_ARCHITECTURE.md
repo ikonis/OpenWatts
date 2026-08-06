@@ -1,11 +1,21 @@
 # Runtime architecture
 
+The user selects one persistent **Operating Mode**: Normal or Maintenance.
+Normal applies production riding, Wi-Fi, MQTT, and sleep policy. Maintenance
+keeps Wi-Fi and the WebUI available on battery and permits calibration, Manual
+Tare, direction reversal, IMU tuning, raw data, and diagnostics. There is no
+separate tuning session, arming step, or timeout.
+
+Operating Mode is a policy input, not an execution runtime. The internal
+exclusive runtimes below remain implementation details. Timer and report
+runtimes never initialize calibration, tuning, or riding algorithms.
+
 OpenWatts uses the same conceptual exclusive runtimes as ikoniWatts:
 
 | Runtime | Initializes | Must not initialize |
 |---|---|---|
 | NORMAL / Riding | IMU, HX711, cadence, BLE CPS | MQTT reporting unless Ride diagnostics is explicitly enabled |
-| USB Maintenance | Wi-Fi/web/OTA/calibration and user diagnostics | battery-only sleep path |
+| USB Maintenance | Wi-Fi/web/OTA and services permitted by Operating Mode | battery-only sleep path |
 | TIMER_DECISION / Battery Check | battery ADC, retained policy state | BLE, IMU streaming, HX711 streaming, web |
 | REPORT / Battery Report | battery ADC, Wi-Fi, MQTT | BLE, cadence, riding timers |
 

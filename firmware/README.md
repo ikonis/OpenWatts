@@ -16,7 +16,14 @@ The LSM6DS3 provider reports missing/read-failed states explicitly. Current
 cadence is a bring-up threshold-crossing implementation and is not a validated
 product cadence algorithm. Rotation-aware power is scaffolded and disabled.
 
-## Runtime model
+## Operating Mode and runtime model
+
+The persistent user-facing Operating Mode is either **Normal** or
+**Maintenance**. Normal maximizes battery life and limits Wi-Fi to USB or a
+policy-required battery report. Maintenance keeps Wi-Fi/WebUI available on
+battery and permits calibration, Manual Tare, direction reversal, diagnostics,
+raw data, and continuous provisional IMU tuning. The Settings segmented control
+saves and applies the mode immediately without the general Save Settings button.
 
 The intended product boundary is four exclusive modes:
 
@@ -53,9 +60,9 @@ and joins the configured network as a station. MQTT reporting publishes a
 retained battery state and Home Assistant discovery for battery voltage,
 estimated battery, battery state, firmware version, and device health.
 
-`Keep Wi-Fi on without USB` is an explicit maintenance/calibration override.
-It defaults off. When enabled it deliberately keeps the AP and web interface
-available on battery; it increases battery consumption and does not alter the
+Maintenance Mode replaces the former `Keep Wi-Fi on without USB` override.
+Existing installations migrate that setting automatically during OTA. It
+deliberately increases battery consumption and does not alter the
 C3/IMU ride logic.
 
 This is a bring-up port, not evidence that the timer/report runtime has been
@@ -75,3 +82,14 @@ Tooling is pinned to Espressif32 6.11.0, ESP-IDF 5.4.1, and RISC-V GCC
 
 Do not flash this parity checkpoint until the actual PCB pin/ADC/IMU bench
 validation in `../docs/VALIDATION.md` has been completed.
+
+## Installation readiness
+
+The Maintenance WebUI now provides complete multi-sample Bench Calibration, Manual
+Tare, direction reversal, verification, and explicit calibration reset.
+Permanent calibration zero/scale are stored separately from runtime zero.
+
+Diagnostics includes continuous provisional IMU tuning while Maintenance Mode
+is selected. Its angle, cadence and confidence never feed production power. Rotation-aware power
+and Automatic Ride Zero remain disabled pending crank-mounted validation. See
+`../docs/INSTALLATION_CHECKLIST.md` and `../docs/IMU_TUNING.md`.
