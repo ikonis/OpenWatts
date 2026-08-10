@@ -5,6 +5,7 @@
 
 #include "esp_rom_sys.h"
 #include "esp_check.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -40,6 +41,7 @@ esp_err_t Hx711::begin() {
         return err;
     }
     gpio_set_level(sck_, 0);
+    monitoring_started_us_ = esp_timer_get_time();
     return ESP_OK;
 }
 
@@ -85,6 +87,43 @@ bool Hx711::read(int32_t &value, uint32_t timeout_ms) {
     return true;
 }
 
+Hx711PollResult Hx711::poll(int32_t &value) {
+    constexpr int64_t kStaleConversionUs = 350000;
+    const int64_t now_us = esp_timer_get_time();
+    if (gpio_get_level(dout_) != 0) {
+        const int64_t reference_us = last_sample_us_ != 0 ? last_sample_us_ : monitoring_started_us_;
+        if (reference_us != 0 && now_us - reference_us >= kStaleConversionUs &&
+            (last_failure_us_ == 0 || now_us - last_failure_us_ >= kStaleConversionUs)) {
+            last_failure_us_ = now_us;
+            return Hx711PollResult::Failure;
+        }
+        return Hx711PollResult::Waiting;
+    }
+
+    if (!read(value, 2)) {
+        last_failure_us_ = now_us;
+        return Hx711PollResult::Failure;
+    }
+
+    const int64_t completed_us = esp_timer_get_time();
+    if (rate_window_started_us_ == 0) {
+        rate_window_started_us_ = completed_us;
+        rate_window_samples_ = 1;
+    } else {
+        ++rate_window_samples_;
+        const int64_t window_us = completed_us - rate_window_started_us_;
+        if (window_us >= 5000000) {
+            sample_rate_hz_ = static_cast<float>(rate_window_samples_ - 1U) * 1000000.0F /
+                              static_cast<float>(window_us);
+            rate_window_started_us_ = completed_us;
+            rate_window_samples_ = 1;
+        }
+    }
+    last_sample_us_ = completed_us;
+    last_raw_counts_ = value;
+    return Hx711PollResult::Sample;
+}
+
 void Hx711::observe(bool success, int32_t raw_value, float smoothing) {
     smoothing = std::clamp(smoothing, 0.0F, 0.95F);
     if (!success) {
@@ -115,12 +154,20 @@ bool Hx711::ready() const {
     return ready_;
 }
 
+int32_t Hx711::lastRawCounts() const {
+    return last_raw_counts_;
+}
+
 float Hx711::filtered() const {
     return ready_ ? filtered_ : 0.0F;
 }
 
 float Hx711::noiseEstimate() const {
     return ready_ ? noise_estimate_ : 0.0F;
+}
+
+float Hx711::sampleRateHz() const {
+    return sample_rate_hz_;
 }
 
 uint32_t Hx711::readFailures() const {

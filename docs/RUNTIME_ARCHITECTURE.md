@@ -1,38 +1,56 @@
 # Runtime architecture
 
-The user selects one persistent **Operating Mode**: Normal or Maintenance.
-Normal applies production riding, Wi-Fi, MQTT, and sleep policy. Maintenance
-keeps Wi-Fi and the WebUI available on battery and permits calibration, Manual
-Tare, direction reversal, IMU tuning, raw data, and diagnostics. There is no
-separate tuning session, arming step, or timeout.
+## User-facing policy
 
-Operating Mode is a policy input, not an execution runtime. The internal
-exclusive runtimes below remain implementation details. Timer and report
-runtimes never initialize calibration, tuning, or riding algorithms.
+The persistent Operating Mode is either **Normal** or **Maintenance**.
 
-OpenWatts uses the same conceptual exclusive runtimes as ikoniWatts:
+- Normal permits Wi-Fi with USB or for a battery report and permits inactivity
+  light sleep when USB is absent and BLE is disconnected.
+- Maintenance keeps Wi-Fi/WebUI active on battery, permits calibration and
+  provisional IMU diagnostics, and disables inactivity sleep.
 
-| Runtime | Initializes | Must not initialize |
-|---|---|---|
-| NORMAL / Riding | IMU, HX711, cadence, BLE CPS | MQTT reporting unless Ride diagnostics is explicitly enabled |
-| USB Maintenance | Wi-Fi/web/OTA and services permitted by Operating Mode | battery-only sleep path |
-| TIMER_DECISION / Battery Check | battery ADC, retained policy state | BLE, IMU streaming, HX711 streaming, web |
-| REPORT / Battery Report | battery ADC, Wi-Fi, MQTT | BLE, cadence, riding timers |
+Operating Mode applies immediately and survives reboot.
 
-Validated target timer flow:
+## Actual execution model
 
-`timer wake → clean start → TIMER_DECISION → silent sleep`
+Current OpenWatts does **not** dispatch through four exclusive restart-based
+runtimes. `app_main()` initializes board IO, battery ADC, HX711, IMU, Wi-Fi as
+policy permits, and BLE, then runs one application loop.
 
-or:
+Normal riding loop:
 
-`timer wake → TIMER_DECISION → retain report intent → clean start → REPORT → sleep`
+`sample HX711 + IMU -> cadence stub -> torque/power -> WebUI snapshot -> MQTT policy -> BLE notify -> sleep decision`
 
-OpenWatts currently retains its pre-parity light-sleep resume loop because the
-real LSM6DS3 interrupt polarity, post-wake sampling and battery ADC scale have
-not yet been measured on hardware. The runtime enums and policy boundary are
-present, but activating restart-based transitions before those measurements
-would create an unverified sleep product. This is an explicit deferred item.
+Normal inactivity sleep:
 
-BLE connection must prevent inactivity sleep. Once disconnected, the configured
-inactivity timer may begin. A motion wake is not a revolution; cadence/power
-remain invalid until sufficient post-wake samples are observed.
+`stop BLE/Wi-Fi -> power down HX711 -> low-power IMU -> light sleep`
+
+Motion or USB wake:
+
+`resume IMU/HX711/BLE -> reset cadence and power acquisition -> main loop`
+
+Timer wake:
+
+`read battery -> qualify state -> decide report`
+
+- No report: return directly to light sleep.
+- Report: start Wi-Fi/MQTT in the existing process, finish the publish, then
+  return to light sleep.
+
+The timer branch avoids the normal sampling body for silent checks, but all
+drivers were initialized before the original sleep. It is therefore not a
+fresh minimal boot runtime.
+
+## Compiled scaffolding
+
+`runtime.h/.cpp` names Riding, USB Maintenance, Battery Check, and Battery
+Report runtimes. `rotation.h/.cpp` defines future sensor-independent rotation
+contracts. Neither currently controls `main.cpp`. They document intended
+separation only and must not be cited as implemented runtime isolation.
+
+The restart-based `TIMER_DECISION -> REPORT` architecture validated in
+ikoniWatts was considered but not activated for OpenWatts. OpenWatts currently
+uses resumed light sleep because its IMU wake path still requires installed
+hardware validation.
+BLE connection prevents inactivity sleep. A motion interrupt is not counted as
+a revolution; cadence and power filters reset after wake and must reacquire.

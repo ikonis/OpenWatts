@@ -23,6 +23,7 @@
 #include "lwip/sockets.h"
 #include "board.h"
 #include "logo_asset.h"
+#include "led_status.h"
 #include "operating_mode.h"
 #include "settings_storage.h"
 #include "web_ui.h"
@@ -75,6 +76,12 @@ esp_err_t otaUploadHandler(httpd_req_t *req) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Firmware image is empty or invalid");
     }
 
+    struct OtaLedGuard {
+        bool keep_active = false;
+        OtaLedGuard() { ledStatus().setOtaActive(true); }
+        ~OtaLedGuard() { if (!keep_active) ledStatus().setOtaActive(false); }
+    } ota_led;
+
     const esp_partition_t *partition = esp_ota_get_next_update_partition(nullptr);
     if (partition == nullptr || req->content_len > static_cast<int>(partition->size)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Firmware image exceeds the update partition");
@@ -125,6 +132,7 @@ esp_err_t otaUploadHandler(httpd_req_t *req) {
     }
 
     ESP_LOGI(kTag, "OTA wrote %d bytes to %s", received, partition->label);
+    ota_led.keep_active = true;
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"Update installed. Restarting now.\"}");
     scheduleOtaReboot();

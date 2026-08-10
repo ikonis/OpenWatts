@@ -7,3 +7,7 @@ with an open input are not proof of a complete bridge.
 After connection, verify raw response, return-to-zero, noise and lack of
 saturation before Bench Calibration. Keep rotation-aware power and Automatic
 Ride Zero disabled.
+
+Current Ride Diagnostics writes a compact serial line; it does not create a
+high-rate MQTT trace. The Diagnostics-page IMU values are provisional and do
+not tune the active cadence stub.

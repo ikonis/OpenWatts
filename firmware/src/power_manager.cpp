@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "hx711.h"
 #include "imu_lsm6ds3.h"
+#include "led_status.h"
 #include "setup_wifi.h"
 
 namespace openwatts {
@@ -49,7 +50,6 @@ esp_err_t PowerManager::enterSleep(BleCyclingPowerService &ble, SetupWifi &setup
         return ESP_OK;
     }
     ESP_LOGI(kTag, "entering IMU-armed light sleep");
-    board::setGreenLed(false);
     ble.stop();
     setup_wifi.stop();
     ESP_RETURN_ON_ERROR(hx711.prepareForSleep(), kTag, "HX711 power-down");
@@ -57,7 +57,9 @@ esp_err_t PowerManager::enterSleep(BleCyclingPowerService &ble, SetupWifi &setup
                         kTag, "IMU wake mode");
     ESP_RETURN_ON_ERROR(configureLightSleepWakeSources(), kTag, "light-sleep wake sources");
 
+    ledStatus().setSleeping(true);
     const esp_err_t sleep_err = esp_light_sleep_start();
+    ledStatus().setSleeping(false);
     gpio_wakeup_disable(board::kImuInt);
     gpio_wakeup_disable(board::kUsbPresent);
     if (sleep_err != ESP_OK) {

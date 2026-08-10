@@ -9,7 +9,9 @@ changes.
 - Advertise Bluetooth Cycling Power Service.
 - Use the fitted LSM6DS3 for motion wake and, after validation, cadence and
   rotational information.
-- Provide USB-only maintenance Wi-Fi, configuration and OTA.
+- In Normal Mode, provide Wi-Fi/configuration only with USB; in deliberate
+  Maintenance Mode, allow Wi-Fi/WebUI to remain active on battery. OTA remains
+  USB-only.
 - Provide optional, policy-controlled MQTT/Home Assistant battery reports.
 - Report battery voltage and charging/USB state.
 - Preserve calibration and credentials across firmware migration.

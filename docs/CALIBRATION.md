@@ -20,6 +20,7 @@ Saved product calibration consists of unloaded raw offset, known-load scale,
 lever arm/crank length, and torque direction. Runtime code must never overwrite
 those values. Automatic runtime tare is intentionally disabled.
 
-The current configuration preserves `zero_offset_counts`, `counts_per_nm`, and
-`torque_sign` across the v3→v4 migration. A future product UI may add guided
-unloaded/known-load capture, but it must preserve the same separation.
+The current schema preserves legacy `zero_offset_counts`, `counts_per_nm`, and
+`torque_sign` while using separate permanent and runtime zero fields. The guided
+unloaded/known-load workflow is implemented in the Calibration page. Physical
+validation on the installed OpenWatts bridge is still required.

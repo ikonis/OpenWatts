@@ -16,6 +16,7 @@
 #include "freertos/task.h"
 #include "hx711.h"
 #include "imu_lsm6ds3.h"
+#include "led_status.h"
 #include "mqtt_notifier.h"
 #include "nvs_flash.h"
 #include "operating_mode.h"
@@ -185,6 +186,7 @@ extern "C" void app_main() {
     ESP_LOGI(kTag, "Operating Mode: %s", openwatts::OperatingPolicy::name(g_config.operating_mode));
 
     ESP_ERROR_CHECK(openwatts::board::initPins());
+    ESP_ERROR_CHECK(openwatts::ledStatus().begin());
     ESP_ERROR_CHECK(openwatts::board::initI2c());
     ESP_ERROR_CHECK(openwatts::board::initBatteryAdc());
 
@@ -196,6 +198,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(g_hx711.begin());
 
     err = g_imu.begin();
+    const bool imu_start_failed = err != ESP_OK;
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "IMU init failed; continuing for HX711/BLE bring-up: %s", esp_err_to_name(err));
     } else {
@@ -223,6 +226,7 @@ extern "C" void app_main() {
     int64_t last_battery_policy_check_us = -5LL * 1000LL * 1000LL;
 
     err = g_ble.begin(g_config.ble_device_name);
+    const bool fatal_startup_error = imu_start_failed || err != ESP_OK;
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "BLE init failed: %s", esp_err_to_name(err));
     }
@@ -235,8 +239,8 @@ extern "C" void app_main() {
     openwatts::BatteryReading status_battery{};
     bool previous_usb_present = usb_present;
     while (true) {
-        openwatts::board::setGreenLed(true);
         if (g_timer_decision_pending) {
+            openwatts::ledStatus().setSleeping(true);
             const int64_t timer_now_us = esp_timer_get_time();
             const bool timer_usb_present = openwatts::board::usbPresent();
             status_battery = readBattery();
@@ -271,21 +275,29 @@ extern "C" void app_main() {
                 }
                 g_timer_decision_pending = wake_result == openwatts::PowerManager::WakeResult::Timer;
             }
-            openwatts::board::setGreenLed(false);
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
-        int32_t raw_counts = 0;
-        const bool hx_ok = g_hx711.read(raw_counts, 25);
-        g_hx711.observe(hx_ok, raw_counts, g_config.hx711_smoothing);
+        openwatts::ledStatus().setSleeping(false);
+
+        int32_t raw_counts = g_hx711.lastRawCounts();
+        const openwatts::Hx711PollResult hx_result = g_hx711.poll(raw_counts);
+        const bool hx_attempted = hx_result != openwatts::Hx711PollResult::Waiting;
+        const bool hx_ok = hx_result == openwatts::Hx711PollResult::Sample;
+        if (hx_attempted) {
+            g_hx711.observe(hx_ok, raw_counts, g_config.hx711_smoothing);
+        }
 
         openwatts::ImuSample imu_sample{};
         g_imu.read(imu_sample);
 
         const int64_t now_us = esp_timer_get_time();
         const bool current_usb_present = openwatts::board::usbPresent();
-        g_setup_wifi.observeCalibration(true, hx_ok, raw_counts, g_hx711.ready(), now_us);
+        openwatts::ledStatus().setAutomaticState(
+            current_usb_present, openwatts::OperatingPolicy::permitsMaintenanceTools(g_config),
+            g_ble.connected(), !g_config.strain_calibration_valid, fatal_startup_error);
+        g_setup_wifi.observeCalibration(hx_attempted, hx_ok, raw_counts, g_hx711.ready(), now_us);
         if (g_setup_wifi.consumeImuTrackerReset()) {
             g_cadence.reset();
             g_provisional_angle = 0.0F;
@@ -376,7 +388,7 @@ extern "C" void app_main() {
             .cadence_rpm = sample.cadence_rpm, .power_watts = sample.power_watts,
             .revolutions = cadence.revolutions, .hx711_failures = g_hx711.readFailures(),
             .hx711_noise = g_hx711.noiseEstimate(),
-            .hx711_sample_rate_hz = g_config.sample_interval_ms ? 1000.0F / g_config.sample_interval_ms : 0.0F,
+            .hx711_sample_rate_hz = g_hx711.sampleRateHz(),
             .wake_reason = wakeReason(), .reset_reason = resetReason(),
             .provisional_angle_degrees = g_provisional_angle,
             .provisional_angular_velocity_dps = provisional_velocity,
@@ -455,7 +467,6 @@ extern "C" void app_main() {
                 g_timer_decision_pending = wake_result == openwatts::PowerManager::WakeResult::Timer;
             }
         }
-        openwatts::board::setGreenLed(false);
         vTaskDelay(pdMS_TO_TICKS(g_config.sample_interval_ms));
     }
 }

@@ -1,95 +1,102 @@
 # OpenWatts firmware
 
-OpenWatts is an ESP32-C3 cycling power meter using an HX711 strain channel and
-an LSM6DS3 IMU. This tree is the independent OpenWatts implementation of the
-runtime and policy boundaries validated in ikoniWatts.
+OpenWatts is an ESP32-C3 cycling power-meter firmware using an HX711 strain
+channel and LSM6DS3 IMU. The current `0.2.0-parity` build is a pre-install
+baseline: maintenance, calibration, BLE CPS, battery, MQTT, OTA, and sleep
+foundations exist, but cadence and installed strain behavior are not yet
+product-validated.
+
+See [`../docs/IMPLEMENTATION_STATUS.md`](../docs/IMPLEMENTATION_STATUS.md) for
+the authoritative implemented/partial/missing/superseded matrix.
 
 ## Hardware boundary
 
-The pin map in `src/board.h` is authoritative and matches the shipped PCB:
-HX711 DOUT/SCK GPIO0/1, LED GPIO3, battery ADC GPIO4, charge status GPIO5,
-I2C SDA/SCL GPIO6/7, USB-present GPIO8, boot GPIO9, IMU INT GPIO10, and native
-USB GPIO18/19. GPIO10 is not an ESP32-C3 RTC GPIO, so the fitted IMU can wake
-light sleep but not deep sleep.
+`src/board.h` is authoritative for the shipped PCB:
 
-The LSM6DS3 provider reports missing/read-failed states explicitly. Current
-cadence is a bring-up threshold-crossing implementation and is not a validated
-product cadence algorithm. Rotation-aware power is scaffolded and disabled.
+- HX711 DOUT/SCK: GPIO0/1
+- awake LED: GPIO3
+- battery ADC: GPIO4
+- charge status: GPIO5
+- I2C SDA/SCL: GPIO6/7
+- USB present: GPIO8
+- boot: GPIO9
+- IMU INT1: GPIO10
+- native USB: GPIO18/19
 
-## Operating Mode and runtime model
+GPIO10 is not an ESP32-C3 deep-sleep wake GPIO. OpenWatts therefore uses IMU-
+armed light sleep for motion wake. Deep sleep is not implemented.
 
-The persistent user-facing Operating Mode is either **Normal** or
-**Maintenance**. Normal maximizes battery life and limits Wi-Fi to USB or a
-policy-required battery report. Maintenance keeps Wi-Fi/WebUI available on
-battery and permits calibration, Manual Tare, direction reversal, diagnostics,
-raw data, and continuous provisional IMU tuning. The Settings segmented control
-saves and applies the mode immediately without the general Save Settings button.
+## Operating Mode
 
-The intended product boundary is four exclusive modes:
+The persistent user-facing mode is exactly **Normal** or **Maintenance**.
 
-- `NORMAL`: IMU, cadence, HX711 and BLE CPS riding services.
-- `USB`: maintenance Wi-Fi, web configuration, calibration and OTA.
-- `TIMER_DECISION`: battery ADC and report policy only.
-- `REPORT`: battery ADC, Wi-Fi and MQTT only.
+- Normal limits Wi-Fi to USB or a required battery report and allows inactivity
+  light sleep.
+- Maintenance keeps Wi-Fi/WebUI active on battery, enables calibration/raw/IMU
+  tools, publishes MQTT on a fixed maintenance cadence, and prevents inactivity
+  sleep.
 
-The current parity checkpoint adds the shared policy and runtime contracts while
-retaining the existing light-sleep riding loop until board validation permits
-the restart-based transitions to be enabled safely. See
-`../docs/RUNTIME_ARCHITECTURE.md`.
+The segmented control applies and saves immediately. Schema 9 and older migrate
+the former keep-Wi-Fi setting to the corresponding schema 10 mode.
 
-## Power pipeline
+## What is usable now
 
-The active estimator remains time-domain and replaceable. Fresh valid samples
-are checked before filtering, passed through median-of-five and EMA (`alpha`
-default 0.35), then clamped at the CPS boundary. Negative, stale, non-finite,
-implausible cadence, and over-limit power are rejected. The default believable
-power limit is 2000 W and may be configured from 500–5000 W.
+- Wi-Fi station mode and recovery/setup AP at `192.168.4.1`
+- responsive WebUI with live status, settings, calibration, OTA, diagnostics
+- USB-only OTA with image/partition validation and automatic reboot
+- NVS persistence and append-only migration
+- battery voltage/display estimate, voltage states, and MQTT reporting
+- Home Assistant MQTT discovery for five battery/device sensors
+- IMU motion wake, USB wake, and timer wake from light sleep
+- HX711 reading/filtering/readiness/failure handling
+- guided Bench Calibration, verification, Manual Tare, direction reversal/reset
+- signed-safe BLE Cycling Power Service and crank-revolution fields
+- invalid-sample rejection plus median-five/EMA power smoothing
 
-BLE CPS instantaneous power is explicitly encoded as signed little-endian
-16-bit. Invalid or negative samples are emitted as zero and never wrap to 65536.
+## Not ready for product riding
 
-## First-flash maintenance and Home Assistant bring-up
+- Cadence is a gyro-Z threshold-crossing bring-up stub. It has not been tuned to
+  the installed crank and can count the wrong motion.
+- Provisional Maintenance IMU angle/cadence/confidence is display-only and does
+  not feed BLE or power.
+- Rotation-aware power, Automatic Ride Zero, ride detection/history, BLE radio
+  controls, debug logging control, deep sleep, and battery protection shutdown
+  are not implemented.
+- Permanent strain calibration has not been validated on the installed bridge.
+- Several persisted compatibility/scaffolding fields are unused; the status
+  document lists each one.
 
-With USB present, OpenWatts starts the `OpenWatts-Setup` access point at
-`192.168.4.1`. The setup page stores Wi-Fi credentials plus MQTT host, port,
-topic, and reporting enablement in NVS. Defaults are `192.168.1.28:1883` and
-`openwatts/battery`.
+## Runtime truth
 
-Once Wi-Fi credentials are saved, the firmware keeps the setup AP available
-and joins the configured network as a station. MQTT reporting publishes a
-retained battery state and Home Assistant discovery for battery voltage,
-estimated battery, battery state, firmware version, and device health.
+Current firmware uses one initialized application loop and resumes after light
+sleep. A timer wake takes a direct battery-decision branch and can return to
+sleep without the normal sampling body. The compiled `RuntimeMode` names are
+not a dispatcher, and OpenWatts does not currently use ikoniWatts' restart-based
+exclusive timer/report runtimes.
 
-Maintenance Mode replaces the former `Keep Wi-Fi on without USB` override.
-Existing installations migrate that setting automatically during OTA. It
-deliberately increases battery consumption and does not alter the
-C3/IMU ride logic.
+## Wi-Fi and MQTT
 
-This is a bring-up port, not evidence that the timer/report runtime has been
-physically validated on OpenWatts. Native USB or the J2 3.3 V UART header is
-required for the first flash.
+If credentials are missing, setup is explicitly requested, or the setup flag is
+set, firmware starts the open `OpenWatts-Setup` AP with wildcard DNS at
+`http://192.168.4.1/`. With saved credentials and no setup request, it starts
+station mode only; it does not keep the AP running.
+
+Default MQTT is plain TCP at `192.168.1.28:1883`, topic
+`openwatts/battery`. There is no MQTT authentication or TLS configuration.
+Messages are retained. Firmware report history is RAM-only.
 
 ## Build and test
 
 ```powershell
+cd firmware
 & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32c3
 & "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32c3_diagnostic
-python -m unittest discover firmware/tests
+py -3 tests/test_parity_architecture.py
+py -3 tests/test_installation_calibration.py
 ```
 
 Tooling is pinned to Espressif32 6.11.0, ESP-IDF 5.4.1, and RISC-V GCC
-14.2.0+20241119.
+14.2.0+20241119. The diagnostic target defines
+`OPENWATTS_DIAGNOSTIC_BUILD=1`, but no current code consumes that macro.
 
-Do not flash this parity checkpoint until the actual PCB pin/ADC/IMU bench
-validation in `../docs/VALIDATION.md` has been completed.
-
-## Installation readiness
-
-The Maintenance WebUI now provides complete multi-sample Bench Calibration, Manual
-Tare, direction reversal, verification, and explicit calibration reset.
-Permanent calibration zero/scale are stored separately from runtime zero.
-
-Diagnostics includes continuous provisional IMU tuning while Maintenance Mode
-is selected. Its angle, cadence and confidence never feed production power. Rotation-aware power
-and Automatic Ride Zero remain disabled pending crank-mounted validation. See
-`../docs/INSTALLATION_CHECKLIST.md` and `../docs/IMU_TUNING.md`.
+The Python tests are host-side contract/source tests, not hardware tests.
