@@ -1,7 +1,7 @@
 # OpenWatts firmware
 
 OpenWatts is an ESP32-C3 cycling power-meter firmware using an HX711 strain
-channel and LSM6DS3 IMU. The current `0.9-rc1` build is the first integrated
+channel and LSM6DS3 IMU. The current `1.0.0` build is the first integrated
 baseline: maintenance, calibration, BLE CPS, battery, MQTT, OTA, and sleep
 foundations exist, but cadence and installed strain behavior are not yet
 product-validated.
@@ -43,7 +43,7 @@ the former keep-Wi-Fi setting to the corresponding schema 10 mode.
 
 - Wi-Fi station mode and recovery/setup AP at `192.168.4.1`
 - responsive WebUI with live status, settings, calibration, OTA, diagnostics
-- USB-only OTA with image/partition validation and automatic reboot
+- OTA on USB, or in Maintenance Mode above 3.75 V, with image/partition validation and automatic reboot
 - NVS persistence and append-only migration
 - battery voltage/display estimate, voltage states, and MQTT reporting
 - Home Assistant MQTT discovery for five battery/device sensors

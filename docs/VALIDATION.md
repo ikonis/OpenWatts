@@ -21,7 +21,7 @@ diagnostic macro is currently unused.
 3. With credentials, confirm station-only connection and reconnect behavior.
 4. Switch Normal/Maintenance in both directions and confirm immediate NVS
    persistence, header badge, Wi-Fi policy, and sleep policy.
-5. Confirm valid OTA succeeds only with USB, rejects invalid/oversize images,
+5. Confirm valid OTA succeeds with USB or with Maintenance Mode and battery at or above 3.75 V, rejects lower/invalid battery and invalid/oversize images,
    reboots, and preserves NVS.
 6. Confirm missing/connected HX711 behavior, raw counts, read failures, and no
    crash when data is unavailable.

@@ -33,6 +33,7 @@ namespace {
 constexpr char kTag[] = "setup_wifi";
 constexpr char kSetupSsid[] = "OpenWatts-Setup";
 constexpr uint8_t kEspImageMagic = 0xE9;
+constexpr float kMinimumBatteryOtaVoltage = 3.75F;
 
 bool g_wifi_initialized = false;
 httpd_handle_t g_httpd = nullptr;
@@ -69,8 +70,16 @@ void scheduleOtaReboot() {
 }
 
 esp_err_t otaUploadHandler(httpd_req_t *req) {
-    if (!board::usbPresent()) {
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "OTA is available only while USB is connected");
+    const bool usb_present = board::usbPresent();
+    const LiveStatus status = g_portal != nullptr ? g_portal->liveStatus() : LiveStatus{};
+    const DeviceConfig *config = g_portal != nullptr ? g_portal->mutableConfig() : nullptr;
+    const bool safe_battery_ota = config != nullptr && OperatingPolicy::isMaintenance(*config) &&
+                                  status.battery_valid && std::isfinite(status.battery_voltage) &&
+                                  status.battery_voltage >= kMinimumBatteryOtaVoltage;
+    if (!usb_present && !safe_battery_ota) {
+        return httpd_resp_send_err(
+            req, HTTPD_403_FORBIDDEN,
+            "OTA requires USB, or Maintenance Mode with a valid battery at or above 3.75 V");
     }
     if (req->content_len < 32) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Firmware image is empty or invalid");

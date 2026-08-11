@@ -4,7 +4,7 @@ This document is an audit of the source at the pre-install baseline. It is not
 a roadmap disguised as current behavior. A feature is listed as implemented
 only when the production code calls it.
 
-Firmware version: `0.9-rc1`  
+Firmware version: `1.0.0`
 NVS schema: `10`  
 Targets: `esp32c3` and `esp32c3_diagnostic`
 
@@ -18,7 +18,7 @@ Targets: `esp32c3` and `esp32c3_diagnostic`
 | Wi-Fi provisioning | With no credentials, or when setup is explicitly requested, the open `OpenWatts-Setup` AP and wildcard DNS serve the portal at `192.168.4.1`. With saved credentials and no setup request, firmware uses station mode only. |
 | NVS | One append-only configuration blob stores credentials, mode, calibration, and supported settings. Shorter old blobs load into current defaults and schema 9 mode state migrates to schema 10. |
 | WebUI | Status, Settings, Calibration, OTA Update, and Diagnostics pages share one responsive header and live `/status` data. |
-| OTA | Raw ESP application `.bin` upload, image magic/size/partition validation, USB-only enforcement, activation, and automatic reboot. There is no signature verification. |
+| OTA | Raw ESP application `.bin` upload, image magic/size/partition validation, activation, and automatic reboot. OTA is allowed on USB, or in Maintenance Mode with a valid battery reading of at least 3.75 V. There is no signature verification. |
 | Battery measurement | Fifteen calibrated ADC samples are trimmed and averaged, then scaled. Voltage is authoritative. Display percentage uses a fixed 1S LiPo curve ending at 4.16 V plus EMA/hysteresis for display stability. |
 | Battery state | Voltage classification for Healthy, Charge Soon, Charge Now, Critical, Protection, and Invalid. A state needs the configured number of matching readings (default two) before qualification. |
 | MQTT reporting | Plain TCP MQTT publishes a retained JSON battery message and retained Home Assistant discovery for voltage, estimated percent, battery state, firmware, and device health. Normal reports use boot/state/delta/retry/heartbeat/USB reasons. |

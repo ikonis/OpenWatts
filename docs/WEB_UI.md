@@ -4,7 +4,7 @@
 - Settings: authoritative NVS-backed controls; unsafe items remain disabled.
 - Calibration: strain assessment, staged Bench Calibration, Manual Tare,
   direction reversal, verification and confirmed reset.
-- OTA Update: USB-only binary upload and automatic reboot.
+- OTA Update: binary upload and automatic reboot on USB, or in Maintenance Mode with a valid battery at or above 3.75 V.
 - Diagnostics: installation evidence, continuous Maintenance-mode IMU tuning,
   raw sensor data, and checklist.
 
@@ -30,7 +30,7 @@ Actions return inline success/failure messages. `/status` is authoritative.
 - debug logging
 - ride diagnostic serial logging
 - calibration, verification, Manual Tare, direction, reset
-- USB-only OTA
+- USB OTA, plus guarded Maintenance Mode battery OTA at or above 3.75 V
 
 ## Deliberately disabled or display-only
 
