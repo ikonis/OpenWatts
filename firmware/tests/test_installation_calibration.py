@@ -72,15 +72,35 @@ class CalibrationArchitectureTests(unittest.TestCase):
         self.assertNotIn("/api/imu-tuning", web)
         self.assertNotIn("imu_tuning_enabled", (SRC / "config.h").read_text())
 
-    def test_nvs_schema_is_append_only_v10(self):
+    def test_nvs_schema_is_append_only_v11(self):
         config = (SRC / "config.h").read_text()
-        self.assertIn("kVersion = 10", config)
+        self.assertIn("kVersion = 11", config)
         self.assertIn("reserved_legacy_imu_tuning_timeout_seconds", config)
         self.assertIn("legacy_wifi_keep_alive_without_usb", config)
         storage = (SRC / "settings_storage.cpp").read_text()
         self.assertIn("nvs_get_blob", storage)
         self.assertIn("DeviceConfig migrated{}", storage)
         self.assertIn("stored_version < 10", storage)
+
+    def test_automatic_ride_zero_cannot_run_without_calibration(self):
+        implementation = (SRC / "ride_zero.cpp").read_text()
+        self.assertIn("!config.strain_calibration_valid", implementation)
+        self.assertIn("RideZeroResult::CalibrationRequired", implementation)
+
+    def test_ride_history_requires_valid_power(self):
+        implementation = (SRC / "ride_log.cpp").read_text()
+        self.assertIn("sample.valid", implementation)
+        main = (SRC / "main.cpp").read_text()
+        self.assertIn("g_config.strain_calibration_valid", main)
+
+    def test_last_ride_mqtt_is_calibration_gated_and_discoverable(self):
+        main = (SRC / "main.cpp").read_text()
+        mqtt = (SRC / "mqtt_notifier.cpp").read_text()
+        self.assertIn("g_config.ride_detection_enabled && g_config.strain_calibration_valid", main)
+        self.assertIn("last_ride_valid", main)
+        self.assertIn("last_ride_peak_power", mqtt)
+        self.assertIn("last_ride_average_cadence", mqtt)
+        self.assertIn("availability_template", mqtt)
 
 
 if __name__ == "__main__":

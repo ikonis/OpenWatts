@@ -22,20 +22,21 @@ Actions return inline success/failure messages. `/status` is authoritative.
 - MQTT enable/broker/port/topic
 - motion-wake sleep and idle delay (sleep-manager changes require restart)
 - BLE device name (requires restart)
+- BLE advertising power (requires restart)
 - power smoothing and maximum believable power
+- automatic Ride Zero and stationary delay (calibration-gated)
+- ride detection, minimum ride duration, and persisted Last Ride summary
+- cadence timeout/range and IMU wake/rotation thresholds
+- debug logging
 - ride diagnostic serial logging
 - calibration, verification, Manual Tare, direction, reset
 - USB-only OTA
 
 ## Deliberately disabled or display-only
 
-BLE advertising power/behavior, Automatic Ride Zero, ride detection, minimum
-ride duration, cadence timeout, motion sensitivity, rotation threshold,
-rotation-aware power, and debug logging are not connected to production
-algorithms. Some values are visible from NVS scaffolding but cannot be edited.
-
-The Last Ride card is a placeholder; no ride lifecycle, summary storage, or
-MQTT ride publication exists. Diagnostics provisional IMU output is for
-observation only and cannot tune or change the production cadence stub.
+Rotation-aware power remains disabled because the installed-crank angle model
+has not been validated. Diagnostics provisional IMU output remains observation
+only and cannot feed production power. Last Ride is stored locally; it is not
+added to the battery MQTT payload.
 
 There is no general Reboot or Factory Reset action in the current WebUI.

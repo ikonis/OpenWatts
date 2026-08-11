@@ -21,12 +21,14 @@ void PowerEstimator::updateConfig(const DeviceConfig &config) {
 
 PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, float noise_estimate, bool hx711_ready,
                                    const CadenceState &cadence) {
-    const float unfiltered_torque = hx711_ready
+    const bool torque_available = hx711_ready && config_.strain_calibration_valid &&
+                                  std::isfinite(config_.counts_per_nm) && config_.counts_per_nm > 0.0F;
+    const float unfiltered_torque = torque_available
         ? ((filtered_counts - static_cast<float>(config_.zero_offset_counts)) / config_.counts_per_nm) *
               static_cast<float>(config_.torque_sign)
         : 0.0F;
 
-    if (!hx711_ready) {
+    if (!torque_available) {
         latest_.torque_nm = 0.0F;
         has_filtered_torque_ = false;
     } else if (!has_filtered_torque_) {

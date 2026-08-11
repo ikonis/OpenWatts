@@ -5,6 +5,7 @@
 #include "calibration.h"
 #include "config.h"
 #include "esp_err.h"
+#include "ride_log.h"
 
 namespace openwatts {
 
@@ -45,6 +46,8 @@ struct LiveStatus {
     float provisional_confidence = 0.0F;
     const char *provisional_reason = "tuning_disabled";
     bool motion_detected = false;
+    LastRideSummary last_ride{};
+    bool ride_active = false;
 };
 
 class SetupWifi {
@@ -57,8 +60,8 @@ public:
     SettingsStorage *storage();
     void updateLiveStatus(const LiveStatus &status);
     LiveStatus liveStatus() const;
-    void requestBenchLightSleep();
-    bool consumeBenchLightSleepRequest();
+    bool consumeConfigChanged();
+    void notifyConfigChanged();
     void observeCalibration(bool attempted, bool success, int32_t raw, bool hx_ready, int64_t now_us);
     CalibrationSnapshot calibrationSnapshot() const;
     esp_err_t calibrationStart(double mass_kg, double lever_mm, bool reverse);
@@ -82,7 +85,7 @@ private:
     DeviceConfig *config_ = nullptr;
     SettingsStorage *storage_ = nullptr;
     LiveStatus live_status_{};
-    std::atomic<bool> bench_light_sleep_requested_{false};
+    std::atomic<bool> config_changed_{false};
     std::atomic<bool> imu_tracker_reset_requested_{false};
     std::atomic<bool> bridge_signal_confirmed_{false};
     CalibrationManager calibration_{};

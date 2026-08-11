@@ -13,7 +13,7 @@ void encodeCyclingPowerMeasurement(const PowerSample &sample, uint8_t payload[8]
 
 class BleCyclingPowerService {
 public:
-    esp_err_t begin(const char *device_name);
+    esp_err_t begin(const char *device_name, int8_t advertising_power_dbm = 0);
     bool connected() const;
     void notify(const PowerSample &sample);
     void setDiagnostics(const char *text);

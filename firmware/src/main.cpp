@@ -23,6 +23,8 @@
 #include "power_estimator.h"
 #include "power_manager.h"
 #include "report_policy.h"
+#include "ride_log.h"
+#include "ride_zero.h"
 #include "setup_wifi.h"
 #include "settings_storage.h"
 #include "self_test.h"
@@ -42,8 +44,10 @@ openwatts::SettingsStorage g_settings;
 openwatts::SelfTest g_self_test;
 openwatts::BatteryPolicy g_battery_policy(g_config);
 openwatts::MqttNotifier g_mqtt;
+openwatts::RideLog g_ride_log;
+openwatts::RideZeroController g_ride_zero;
 bool g_mqtt_discovery_pending = true;
-char g_mqtt_payload[512]{};
+char g_mqtt_payload[896]{};
 openwatts::ReportHistory g_report_history{};
 openwatts::ReportReason g_pending_report_reason = openwatts::ReportReason::None;
 bool g_timer_decision_pending = false;
@@ -76,8 +80,8 @@ const char *resetReason() {
 
 uint8_t estimateBatteryPercent(float voltage) {
     struct Point { float voltage; uint8_t percent; };
-    // This is the same conservative 1S LiPo display curve validated on
-    // ikoniWatts.  4.16 V is the observed full-charge endpoint, not 4.20 V.
+    // Conservative 1S LiPo display curve. Voltage remains authoritative;
+    // 4.16 V is the observed full-charge endpoint on assembled OpenWatts.
     static constexpr Point curve[] = {
         {3.20F, 0}, {3.50F, 5}, {3.65F, 15}, {3.75F, 35},
         {3.85F, 55}, {3.95F, 75}, {4.05F, 90}, {4.16F, 100},
@@ -95,9 +99,8 @@ uint8_t estimateBatteryPercent(float voltage) {
 }
 
 uint8_t stableBatteryPercent(float voltage) {
-    // Keep the measured voltage authoritative, but stabilize the human-facing
-    // percentage exactly as ikoniWatts does.  This prevents tiny ADC or
-    // charge-surface changes from making the dashboard visibly jump.
+    // Keep measured voltage authoritative while preventing ADC noise and
+    // charge-surface changes from making the display visibly jump.
     constexpr float kAlpha = 0.12F;
     constexpr float kVoltageHysteresis = 0.006F;
     if (!g_battery_display_initialized) {
@@ -131,19 +134,30 @@ openwatts::BatteryReading readBattery() {
 
 bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::BatteryState state,
                         openwatts::ReportReason reason, bool usb_present, int64_t now_us) {
+    const openwatts::LastRideSummary &ride = g_ride_log.lastRide();
     std::snprintf(g_mqtt_payload, sizeof(g_mqtt_payload),
                   "{\"device\":\"OpenWatts\",\"firmware_version\":\"%s\","
                   "\"battery_voltage\":%.2f,\"estimated_percent\":%u,"
                   "\"battery_status\":\"%s\",\"battery_valid\":%s,"
                   "\"usb_present\":%s,\"runtime\":\"%s\",\"device_health\":\"Healthy\","
-                  "\"report_reason\":\"%s\"}",
+                  "\"report_reason\":\"%s\","
+                  "\"last_ride_valid\":%s,\"last_ride_sequence\":%u,"
+                  "\"last_ride_moving_seconds\":%u,\"last_ride_elapsed_seconds\":%u,"
+                  "\"last_ride_revolutions\":%u,\"last_ride_average_power\":%.1f,"
+                  "\"last_ride_peak_power\":%d,\"last_ride_average_cadence\":%.1f,"
+                  "\"last_ride_peak_cadence\":%.1f,\"last_ride_work_kj\":%.2f,"
+                  "\"last_ride_end_reason\":\"%s\"}",
                   OPENWATTS_FIRMWARE_VERSION, battery.voltage,
                   static_cast<unsigned>(battery.estimated_percent),
                   openwatts::BatteryPolicy::name(state), battery.valid ? "true" : "false",
                   usb_present ? "true" : "false",
                   openwatts::OperatingPolicy::isMaintenance(g_config) ? "Maintenance" :
                       (usb_present ? "Normal / USB" : "Battery Report"),
-                  openwatts::reportReasonName(reason));
+                  openwatts::reportReasonName(reason), ride.valid ? "true" : "false",
+                  static_cast<unsigned>(ride.sequence), static_cast<unsigned>(ride.moving_seconds),
+                  static_cast<unsigned>(ride.elapsed_seconds), static_cast<unsigned>(ride.crank_revolutions),
+                  ride.average_power_watts, static_cast<int>(ride.maximum_power_watts),
+                  ride.average_cadence_rpm, ride.maximum_cadence_rpm, ride.work_kj, ride.end_reason);
     const esp_err_t mqtt_err = g_mqtt.begin(g_config.mqtt_host, g_config.mqtt_port, g_config.mqtt_topic,
                                             g_mqtt_payload, g_mqtt_discovery_pending);
     g_report_history.last_attempt_seconds = static_cast<uint64_t>(now_us / 1000000LL);
@@ -170,6 +184,28 @@ void finishBatteryReport(const openwatts::BatteryReading &battery, openwatts::Ba
     }
     g_mqtt.stop();
 }
+
+void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerSample &sample, int64_t now_us) {
+    const openwatts::RideZeroAttempt attempt = g_ride_zero.attempt(
+        trigger, g_config, sample, g_ride_log.active(), g_setup_wifi.calibrationSnapshot().active, now_us);
+    if (g_config.ride_diagnostics_enabled) {
+        ESP_LOGI(kTag, "Ride Zero: trigger=%s result=%s mean=%.1f variance=%.1f samples=%u locked=%d",
+                 openwatts::RideZeroController::triggerName(trigger),
+                 openwatts::RideZeroController::resultName(attempt.result), attempt.average, attempt.variance,
+                 static_cast<unsigned>(attempt.samples), g_ride_zero.locked() ? 1 : 0);
+    }
+    if (attempt.result != openwatts::RideZeroResult::Accepted) return;
+    openwatts::DeviceConfig candidate = g_config;
+    candidate.runtime_zero_offset_counts = attempt.zero_offset;
+    candidate.zero_offset_counts = attempt.zero_offset;
+    const esp_err_t err = g_settings.save(candidate);
+    if (err == ESP_OK) {
+        g_config = candidate;
+        g_power.updateConfig(g_config);
+    } else {
+        ESP_LOGW(kTag, "Ride Zero save failed: %s", esp_err_to_name(err));
+    }
+}
 }  // namespace
 
 extern "C" void app_main() {
@@ -183,6 +219,8 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(g_settings.begin());
     g_config = g_settings.load();
+    g_ride_log.begin(g_settings.loadLastRide());
+    esp_log_level_set(kTag, g_config.debug_logging_enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO);
     ESP_LOGI(kTag, "Operating Mode: %s", openwatts::OperatingPolicy::name(g_config.operating_mode));
 
     ESP_ERROR_CHECK(openwatts::board::initPins());
@@ -225,7 +263,7 @@ extern "C" void app_main() {
 
     int64_t last_battery_policy_check_us = -5LL * 1000LL * 1000LL;
 
-    err = g_ble.begin(g_config.ble_device_name);
+    err = g_ble.begin(g_config.ble_device_name, g_config.ble_advertising_power_dbm);
     const bool fatal_startup_error = imu_start_failed || err != ESP_OK;
     if (err != ESP_OK) {
         ESP_LOGW(kTag, "BLE init failed: %s", esp_err_to_name(err));
@@ -238,6 +276,10 @@ extern "C" void app_main() {
     int64_t last_status_battery_us = -1000000;
     openwatts::BatteryReading status_battery{};
     bool previous_usb_present = usb_present;
+    bool previous_ble_connected = false;
+    int64_t usb_removed_zero_due_us = 0;
+    int64_t stationary_since_us = 0;
+    bool stationary_zero_attempted = false;
     while (true) {
         if (g_timer_decision_pending) {
             openwatts::ledStatus().setSleeping(true);
@@ -281,6 +323,18 @@ extern "C" void app_main() {
 
         openwatts::ledStatus().setSleeping(false);
 
+        if (g_setup_wifi.consumeConfigChanged()) {
+            g_cadence.updateConfig(g_config);
+            g_power.updateConfig(g_config);
+            g_power_manager.updateConfig(g_config);
+            g_battery_policy.updateConfig(g_config);
+            esp_log_level_set("hx711", g_config.debug_logging_enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+            esp_log_level_set("imu", g_config.debug_logging_enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+            esp_log_level_set("power", g_config.debug_logging_enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+            esp_log_level_set(kTag, g_config.debug_logging_enabled ? ESP_LOG_DEBUG : ESP_LOG_INFO);
+            ESP_LOGI(kTag, "runtime settings applied");
+        }
+
         int32_t raw_counts = g_hx711.lastRawCounts();
         const openwatts::Hx711PollResult hx_result = g_hx711.poll(raw_counts);
         const bool hx_attempted = hx_result != openwatts::Hx711PollResult::Waiting;
@@ -305,32 +359,23 @@ extern "C" void app_main() {
             g_provisional_revolutions = 0;
             g_last_provisional_imu_us = now_us;
         }
-        if (g_setup_wifi.consumeBenchLightSleepRequest()) {
-            ESP_LOGI(kTag, "bench request: entering IMU-armed light sleep");
-            const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu);
-            if (sleep_err != ESP_OK) {
-                ESP_LOGW(kTag, "bench light sleep failed: %s", esp_err_to_name(sleep_err));
-            } else if (openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
-                const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, current_usb_present, false);
-                if (wifi_err != ESP_OK) ESP_LOGW(kTag, "Wi-Fi restore after bench wake failed: %s", esp_err_to_name(wifi_err));
-            }
-            g_cadence.reset();
-            g_power.reset();
-            continue;
-        }
         if (current_usb_present != previous_usb_present) {
             previous_usb_present = current_usb_present;
             ESP_LOGI(kTag, "USB %s", current_usb_present ? "inserted" : "removed");
             g_pending_report_reason = current_usb_present ? openwatts::ReportReason::UsbConnected
                                                           : openwatts::ReportReason::UsbDisconnected;
             if (current_usb_present) {
+                g_ride_zero.resetLifecycle();
+                usb_removed_zero_due_us = 0;
                 const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, true, false);
                 if (wifi_err != ESP_OK) {
                     ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
                 }
             } else if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
+                usb_removed_zero_due_us = now_us + 2000000LL;
                 g_setup_wifi.stop();
             } else {
+                usb_removed_zero_due_us = now_us + 2000000LL;
                 ESP_LOGI(kTag, "USB removed; Maintenance Mode keeps Wi-Fi and WebUI active");
             }
         }
@@ -370,6 +415,42 @@ extern "C" void app_main() {
         g_power.updateConfig(g_config);
         const openwatts::PowerSample sample = g_power.update(raw_counts, g_hx711.filtered(), g_hx711.noiseEstimate(),
                                                              g_hx711.ready(), cadence);
+        g_ride_zero.observe(g_hx711.filtered(), hx_ok, now_us);
+        if (usb_removed_zero_due_us != 0 && now_us >= usb_removed_zero_due_us) {
+            attemptRideZero(openwatts::RideZeroTrigger::UsbRemoved, sample, now_us);
+            usb_removed_zero_due_us = 0;
+        }
+        const bool ble_connected = g_ble.connected();
+        if (ble_connected != previous_ble_connected) {
+            attemptRideZero(ble_connected ? openwatts::RideZeroTrigger::BleConnected
+                                          : openwatts::RideZeroTrigger::BleDisconnected,
+                            sample, now_us);
+            previous_ble_connected = ble_connected;
+        }
+        if (g_config.strain_calibration_valid && cadence.moving) {
+            g_ride_zero.lock();
+            stationary_since_us = 0;
+            stationary_zero_attempted = false;
+        } else if (!cadence.moving) {
+            if (stationary_since_us == 0) stationary_since_us = now_us;
+            if (!stationary_zero_attempted && now_us - stationary_since_us >=
+                    static_cast<int64_t>(g_config.ride_zero_stationary_timeout_seconds) * 1000000LL) {
+                attemptRideZero(openwatts::RideZeroTrigger::Stationary, sample, now_us);
+                stationary_zero_attempted = true;
+            }
+        }
+        if (g_config.ride_detection_enabled && g_config.strain_calibration_valid) {
+            const bool ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds);
+            if (ride_completed) g_ride_zero.resetLifecycle();
+            if (g_ride_log.completedPendingSave()) {
+                const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
+                if (ride_err == ESP_OK) {
+                    g_ride_log.markSaved();
+                    g_pending_report_reason = openwatts::ReportReason::Manual;
+                }
+                else ESP_LOGW(kTag, "last ride save failed: %s", esp_err_to_name(ride_err));
+            }
+        }
         if (now_us - last_status_battery_us >= 1000LL * 1000LL) {
             last_status_battery_us = now_us;
             status_battery = readBattery();
@@ -396,6 +477,7 @@ extern "C" void app_main() {
             .provisional_revolutions = g_provisional_revolutions,
             .provisional_confidence = provisional_confidence,
             .provisional_reason = provisional_reason, .motion_detected = motion_detected,
+            .last_ride = g_ride_log.lastRide(), .ride_active = g_ride_log.active(),
         });
 
         // Reporting is independent from battery sampling.  It can wake the
@@ -440,6 +522,9 @@ extern "C" void app_main() {
         if ((now_us - last_publish_us) >= static_cast<int64_t>(g_config.publish_interval_ms) * 1000LL) {
             last_publish_us = now_us;
             g_ble.notify(sample);
+            ESP_LOGD(kTag, "sample raw=%" PRId32 " filtered=%.1f noise=%.1f rpm=%.1f torque=%.2f power=%d valid=%d",
+                     sample.raw_counts, sample.filtered_counts, sample.noise_estimate, sample.cadence_rpm,
+                     sample.torque_nm, sample.power_watts, sample.valid ? 1 : 0);
             if (g_config.ride_diagnostics_enabled) {
                 ESP_LOGI(kTag,
                          "rpm=%.1f power=%dW raw=%" PRId32 " hx=%d imu=%d rev=%" PRIu32 " ble=%d wifi_setup=%d",
@@ -455,6 +540,7 @@ extern "C" void app_main() {
         // sleep would immediately tear down the web server and radio.
         if (openwatts::OperatingPolicy::permitsInactivitySleep(g_config) && !current_usb_present && !g_ble.connected() &&
             g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
+            attemptRideZero(openwatts::RideZeroTrigger::BeforeSleep, sample, now_us);
             openwatts::PowerManager::WakeResult wake_result{};
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu, &wake_result);
             if (sleep_err != ESP_OK) {

@@ -18,7 +18,9 @@ Bench calibration and runtime zero are separate concepts.
 
 Saved product calibration consists of unloaded raw offset, known-load scale,
 lever arm/crank length, and torque direction. Runtime code must never overwrite
-those values. Automatic runtime tare is intentionally disabled.
+those values. Automatic Ride Zero can update only the runtime zero, requires a
+valid Bench Calibration and a stable 32-sample unloaded window, and locks once
+a valid ride begins.
 
 The current schema preserves legacy `zero_offset_counts`, `counts_per_nm`, and
 `torque_sign` while using separate permanent and runtime zero fields. The guided

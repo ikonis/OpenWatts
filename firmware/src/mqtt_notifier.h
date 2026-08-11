@@ -25,7 +25,7 @@ private:
 
     esp_mqtt_client_handle_t client_ = nullptr;
     char topic_[96]{};
-    char payload_[512]{};
+    char payload_[896]{};
     bool publish_discovery_ = false;
     std::atomic<bool> running_{false};
     std::atomic<bool> complete_{false};

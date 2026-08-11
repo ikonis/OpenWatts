@@ -1,7 +1,7 @@
 # OpenWatts firmware
 
 OpenWatts is an ESP32-C3 cycling power-meter firmware using an HX711 strain
-channel and LSM6DS3 IMU. The current `0.2.0-parity` build is a pre-install
+channel and LSM6DS3 IMU. The current `0.9-rc1` build is the first integrated
 baseline: maintenance, calibration, BLE CPS, battery, MQTT, OTA, and sleep
 foundations exist, but cadence and installed strain behavior are not yet
 product-validated.
@@ -52,6 +52,9 @@ the former keep-Wi-Fi setting to the corresponding schema 10 mode.
 - guided Bench Calibration, verification, Manual Tare, direction reversal/reset
 - signed-safe BLE Cycling Power Service and crank-revolution fields
 - invalid-sample rejection plus median-five/EMA power smoothing
+- calibration-gated automatic Ride Zero with stable multi-sample acceptance
+- calibration-gated ride detection and persistent last-ride summary
+- configurable cadence timeout/range, motion wake, BLE radio power, and logging
 
 ## Not ready for product riding
 
@@ -59,9 +62,8 @@ the former keep-Wi-Fi setting to the corresponding schema 10 mode.
   the installed crank and can count the wrong motion.
 - Provisional Maintenance IMU angle/cadence/confidence is display-only and does
   not feed BLE or power.
-- Rotation-aware power, Automatic Ride Zero, ride detection/history, BLE radio
-  controls, debug logging control, deep sleep, and battery protection shutdown
-  are not implemented.
+- Rotation-aware power, deep sleep, and battery protection shutdown are not
+  implemented. Rotation-aware power remains deliberately disabled.
 - Permanent strain calibration has not been validated on the installed bridge.
 - Several persisted compatibility/scaffolding fields are unused; the status
   document lists each one.
@@ -71,8 +73,7 @@ the former keep-Wi-Fi setting to the corresponding schema 10 mode.
 Current firmware uses one initialized application loop and resumes after light
 sleep. A timer wake takes a direct battery-decision branch and can return to
 sleep without the normal sampling body. The compiled `RuntimeMode` names are
-not a dispatcher, and OpenWatts does not currently use ikoniWatts' restart-based
-exclusive timer/report runtimes.
+not a dispatcher; timer decisions remain a direct light-sleep fast path.
 
 ## Wi-Fi and MQTT
 

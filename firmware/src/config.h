@@ -9,7 +9,7 @@ namespace openwatts {
 
 struct DeviceConfig {
     static constexpr uint32_t kMagic = 0x4F575454;  // OWTT
-    static constexpr uint32_t kVersion = 10;
+    static constexpr uint32_t kVersion = 11;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -20,12 +20,12 @@ struct DeviceConfig {
     // product from light sleep. Deep sleep remains available only for timed
     // battery-protection shutdowns.
     bool light_sleep_enabled = true;
-    bool deep_sleep_enabled = false;
+    bool reserved_deep_sleep_enabled = false;
     bool wake_on_timer_enabled = true;
     uint32_t timer_wake_seconds = 300;
     bool wake_on_imu_enabled = true;
     bool wake_on_usb_enabled = true;
-    bool wake_on_button_enabled = false;
+    bool reserved_wake_on_button_enabled = false;
     bool wifi_setup_on_usb = true;
     // Retained at its historical offset for v9-and-older NVS migration only.
     bool legacy_wifi_keep_alive_without_usb = false;
@@ -84,7 +84,7 @@ struct DeviceConfig {
     uint16_t minimum_ride_duration_seconds = 180;
     uint16_t cadence_timeout_seconds = 5;
     int8_t ble_advertising_power_dbm = 0;
-    bool ble_auto_advertise_enabled = true;
+    bool reserved_legacy_ble_auto_advertise_enabled = true;
 
     // Permanent bench calibration and mutable in-service zero are deliberately
     // separate. Automatic/runtime tare must never alter the permanent scale.
@@ -110,6 +110,7 @@ struct DeviceConfig {
     uint16_t reserved_legacy_imu_tuning_timeout_seconds = 900;
 
     OperatingMode operating_mode = OperatingMode::Normal;
+    uint16_t ride_zero_stationary_timeout_seconds = 30;
 
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';

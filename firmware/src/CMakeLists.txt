@@ -24,6 +24,8 @@ idf_component_register(
         "rotation.cpp"
         "operating_mode.cpp"
         "led_status.cpp"
+        "ride_log.cpp"
+        "ride_zero.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/logo_asset.cpp"
     INCLUDE_DIRS "."
     REQUIRES bt driver esp_adc esp_event esp_http_server esp_netif esp_timer esp_wifi mqtt app_update esp_https_ota nvs_flash

@@ -49,7 +49,7 @@ contracts. Neither currently controls `main.cpp`. They document intended
 separation only and must not be cited as implemented runtime isolation.
 
 The restart-based `TIMER_DECISION -> REPORT` architecture validated in
-ikoniWatts was considered but not activated for OpenWatts. OpenWatts currently
+The restart-based timer/report architecture was considered but not activated. OpenWatts currently
 uses resumed light sleep because its IMU wake path still requires installed
 hardware validation.
 BLE connection prevents inactivity sleep. A motion interrupt is not counted as

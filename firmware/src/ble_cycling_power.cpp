@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "esp_log.h"
+#include "esp_bt.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
 #include "nimble/nimble_port.h"
@@ -28,6 +29,19 @@ uint16_t g_sensor_location_handle = 0;
 uint16_t g_diagnostics_handle = 0;
 uint8_t g_addr_type = 0;
 char g_diagnostics[160] = "self-test not run";
+
+esp_power_level_t closestPowerLevel(int8_t dbm) {
+    if (dbm <= -18) return ESP_PWR_LVL_N18;
+    if (dbm <= -15) return ESP_PWR_LVL_N15;
+    if (dbm <= -12) return ESP_PWR_LVL_N12;
+    if (dbm <= -9) return ESP_PWR_LVL_N9;
+    if (dbm <= -6) return ESP_PWR_LVL_N6;
+    if (dbm <= -3) return ESP_PWR_LVL_N3;
+    if (dbm <= 0) return ESP_PWR_LVL_N0;
+    if (dbm <= 3) return ESP_PWR_LVL_P3;
+    if (dbm <= 6) return ESP_PWR_LVL_P6;
+    return ESP_PWR_LVL_P9;
+}
 
 uint32_t featureBits() {
     return 0x00000008UL;  // Crank revolution data supported.
@@ -108,7 +122,7 @@ void encodeCyclingPowerMeasurement(const PowerSample &sample, uint8_t payload[8]
     payload[7] = static_cast<uint8_t>(sample.last_crank_event_time >> 8);
 }
 
-esp_err_t BleCyclingPowerService::begin(const char *device_name) {
+esp_err_t BleCyclingPowerService::begin(const char *device_name, int8_t advertising_power_dbm) {
     g_service = this;
     if (device_name != nullptr && device_name[0] != '\0') {
         std::strncpy(device_name_, device_name, sizeof(device_name_) - 1);
@@ -124,6 +138,11 @@ esp_err_t BleCyclingPowerService::begin(const char *device_name) {
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set(device_name_);
+    const esp_err_t power_err = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,
+                                                     closestPowerLevel(advertising_power_dbm));
+    if (power_err != ESP_OK) {
+        ESP_LOGW(kTag, "could not set advertising power: %s", esp_err_to_name(power_err));
+    }
     ble_hs_cfg.sync_cb = &BleCyclingPowerService::onSync;
 
     int rc = ble_gatts_count_cfg(gatt_services);

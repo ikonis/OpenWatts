@@ -4,7 +4,7 @@ This document is an audit of the source at the pre-install baseline. It is not
 a roadmap disguised as current behavior. A feature is listed as implemented
 only when the production code calls it.
 
-Firmware version: `0.2.0-parity`  
+Firmware version: `0.9-rc1`  
 NVS schema: `10`  
 Targets: `esp32c3` and `esp32c3_diagnostic`
 
@@ -37,9 +37,9 @@ Targets: `esp32c3` and `esp32c3_diagnostic`
 
 | Area | What exists | What is not complete |
 |---|---|---|
-| Cadence | Counts a revolution when gyro Z crosses a fixed threshold, rearms below 25% of the threshold, and derives RPM from consecutive crossings. | Axis, orientation, filtering, direction, false-motion rejection, cadence timeout, and installed-crank accuracy are not validated. This is not a production cadence algorithm. |
+| Cadence | Counts a revolution when gyro Z crosses a configurable threshold, rearms below 25%, derives RPM, applies a configurable timeout, and rejects configured implausible RPM. | Axis, orientation, filtering, direction, false-motion rejection, and installed-crank accuracy are not validated. This is not yet a production cadence algorithm. |
 | Provisional IMU view | Maintenance computes dominant-axis velocity, integrated absolute angle, tentative cadence/revolutions, and a simple confidence value for the Diagnostics page. | It does not calibrate or tune the production algorithm, save results, or feed BLE/power/calibration. |
-| Timer battery path | A timer wake stays in the existing process, reads battery, decides whether to report, and otherwise returns to light sleep without executing the main sampling body. | It is not the restart-based `TIMER_DECISION`/`REPORT` architecture used by ikoniWatts. Runtime enums are not used for dispatch. |
+| Timer battery path | A timer wake stays in the existing process, reads battery, decides whether to report, and otherwise returns to light sleep without executing the main sampling body. | Runtime enums are not used for dispatch. |
 | MQTT reliability | Publish success updates in-RAM report history; failure sets an in-RAM retry flag. | History does not survive reboot, there is no username/password/TLS setting, and the WebUI does not expose connection/result state. |
 | Device health | The Status page derives a basic IMU/HX711 readiness label. | MQTT currently publishes `device_health` as hard-coded `Healthy`, even when sensors are not healthy. |
 | Charging status | GPIO5 active-low status is shown as charging/not charging. | It does not provide charge current, time remaining, or a separate full/fault state. |
@@ -59,13 +59,10 @@ must not be described as working controls.
   uses `battery_report_voltage_delta`.
 - MQTT percentage thresholds: stored and sanitized but report decisions use
   voltage states, not these percentages.
-- `debug_logging_enabled`: stored/exposed in status but no log-level code reads
-  it; its UI control is disabled.
-- Automatic Ride Zero, ride detection, minimum ride duration, cadence timeout,
-  last-ride storage, and last-ride MQTT publication: not implemented.
-- BLE advertising power and automatic-advertising settings: stored only; the
-  BLE service uses fixed radio/advertising behavior and the controls are
-  disabled.
+- Last-ride MQTT publication is not implemented; the latest ride is stored in
+  NVS and displayed locally.
+- Automatic-advertising remains fixed product behavior. Its historical NVS bit
+  is reserved for binary-layout compatibility.
 - Rotation-aware power: flag and sensor-independent types exist, but no runtime
   algorithm consumes them and the UI is disabled.
 - Most IMU configuration fields (ODR/range/stationary timeout/confidence/cadence
@@ -84,15 +81,15 @@ uses the value but the current Settings page does not expose it.
 | Fields | Status |
 |---|---|
 | `sample_interval_ms`, `publish_interval_ms` | Implemented, hidden. Control main sampling delay and BLE notification interval. |
-| `inactivity_timeout_ms`, `light_sleep_enabled` | Implemented and editable. PowerManager receives changes only at boot, so restart is required. Cadence also uses inactivity timeout as its stale-RPM timeout. |
+| `inactivity_timeout_ms`, `light_sleep_enabled` | Implemented and editable; runtime changes are applied centrally. |
 | `wake_on_timer_enabled`, `wake_on_usb_enabled` | Implemented internally and forced on by PowerManager. |
 | `timer_wake_seconds`, `wake_on_imu_enabled`, `imu_wake_threshold`, `imu_wake_duration` | Implemented, hidden. Loaded at boot. |
-| `deep_sleep_enabled`, `wake_on_button_enabled` | Unused. |
+| reserved deep-sleep/button-wake fields | Binary-layout compatibility only. |
 | `wifi_setup_on_usb`, `force_setup_portal` | Implemented internal setup gates. No dedicated user control; normal Settings save clears `force_setup_portal`. |
 | `run_self_test_on_boot`, `self_test_done` | Implemented internal boot-test state. |
 | `hx711_smoothing` | Implemented, hidden. Larger values retain more old data and therefore smooth more. |
 | calibration/zero/scale/sign/mass/lever fields | Implemented and managed by Calibration actions. |
-| `imu_revolution_threshold_dps` | Implemented by the temporary gyro-Z cadence provider, but disabled in UI because it is unsafe before installed validation. |
+| `imu_revolution_threshold_dps` | Implemented and editable for installed-crank tuning of the temporary gyro-Z cadence provider. |
 | BLE device name | Implemented and editable; applied on reboot. |
 | MQTT enable/host/port/topic | Implemented and editable; plain TCP only. |
 | MQTT percentage thresholds | Unused. |
@@ -102,16 +99,15 @@ uses the value but the current Settings page does not expose it.
 | battery hysteresis and USB report delta | Stored but unused. |
 | maximum power and power-filter alpha | Implemented and editable; the main loop consumes saved values immediately. |
 | Ride Diagnostics | Implemented and editable; serial logging only. |
-| Automatic Ride Zero, ride detection, minimum ride duration, cadence timeout | Stored but unused. |
+| Automatic Ride Zero, ride detection, minimum ride duration, cadence timeout | Implemented and editable; Ride Zero/history remain calibration-gated. |
 | rotation-aware power | Stored but unused. |
-| debug logging | Stored but unused. |
-| BLE advertising power/auto-advertise | Stored but unused. |
+| debug logging | Implemented and editable. |
+| BLE advertising power | Implemented and editable; applied after restart. |
 | IMU ODR/range/stationary/confidence/cadence-limit/direction/reference fields | Stored but unused; driver values are fixed. |
 | legacy Wi-Fi flag and legacy tuning timeout | Migration/layout only; never product controls. |
 
 ## Removed or superseded designs
 
-- Zigbee is not part of OpenWatts firmware.
 - The separate timed IMU tuning session, arming flow, countdown, and timeout
   were removed. Maintenance Mode now authorizes continuous provisional IMU
   viewing. The old timeout field remains reserved only to preserve NVS layout.
@@ -119,7 +115,7 @@ uses the value but the current Settings page does not expose it.
   remains only for schema migration.
 - Deep sleep as the normal motion-wake state was rejected for this PCB because
   the fitted IMU interrupt is GPIO10, which cannot wake ESP32-C3 deep sleep.
-- The restart-based ikoniWatts timer/report runtime was not activated in
+- The restart-based timer/report runtime was not activated in
   OpenWatts. Current code resumes from light sleep and uses a direct timer
   decision branch.
 

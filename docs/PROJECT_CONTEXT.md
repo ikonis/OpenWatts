@@ -1,7 +1,7 @@
 # OpenWatts project context
 
 OpenWatts is the ESP32-C3/LSM6DS3 successor to the ESP32-C6/Hall-based
-ikoniWatts prototype. The assembled PCB is fixed. Firmware must use `board.h`
+earlier proof-of-concept firmware. The assembled PCB is fixed. Firmware must use `board.h`
 and must not invent PCB changes.
 
 The current repository is a **pre-install baseline**, not a completed power
@@ -16,7 +16,8 @@ Production cadence and installed strain behavior remain unvalidated.
   policy and keeps Wi-Fi available on battery.
 - Bench Calibration and runtime Manual Tare are separate persisted concepts.
 - Provisional IMU data is isolated from production BLE/power output.
-- Rotation-aware power and automatic Ride Zero remain disabled.
+- Rotation-aware power remains disabled. Automatic Ride Zero and ride history
+  are implemented but cannot operate until Bench Calibration is valid.
 
 ## Important current limitations
 
@@ -32,5 +33,5 @@ Production cadence and installed strain behavior remain unvalidated.
 Saved Wi-Fi credentials, Operating Mode, and calibration are product data and
 must survive OTA/schema upgrades. New persisted fields must remain append-only.
 
-Shared ikoniWatts behavior should be reused at policy/service level, never by
-copying C6 GPIO, Hall-sensor, or restart-runtime assumptions into OpenWatts.
+Hardware-independent behavior belongs in policy/service modules; ESP32-C3,
+LSM6DS3, USB, battery, and HX711 behavior remains behind OpenWatts drivers.

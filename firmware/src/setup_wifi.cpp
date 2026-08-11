@@ -238,22 +238,6 @@ esp_err_t badSetting(httpd_req_t *req, const char *message) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, message);
 }
 
-esp_err_t benchSleepHandler(httpd_req_t *req) {
-    if (g_portal == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
-    g_portal->requestBenchLightSleep();
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"Entering IMU-armed light sleep\"}");
-}
-
-esp_err_t benchHandler(httpd_req_t *req) {
-    static constexpr char kPage[] =
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>OpenWatts Bench Test</title><style>:root{color-scheme:dark;--bg:#111;--card:#1b1b1b;--line:#3a3a3a;--text:#f1f1f1;--muted:#aaa;--amber:#e7c86c}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px system-ui,sans-serif}header{position:sticky;top:0;background:#151515f2;border-bottom:1px solid var(--line)}.bar,main{max-width:1100px;margin:auto;padding:13px 14px}.bar{display:flex;gap:4px;align-items:center}.brand{font-size:20px;font-weight:800;margin-right:6px}nav{display:flex;gap:4px;flex:1;overflow-x:auto}a{color:var(--muted);text-decoration:none;padding:9px 10px;border-radius:8px;white-space:nowrap}a:hover,a.active{background:#303030;color:var(--text)}.card{max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:14px}.sub{color:var(--muted)}button{border:1px solid #7b6830;background:#3b331d;color:var(--text);border-radius:9px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer}.result{margin-top:12px;padding:11px;border:1px solid var(--line);border-radius:9px;background:#121212}</style></head><body><header><div class=bar><span class=brand>OpenWatts</span><nav><a href=/>Status</a><a href=/settings>Settings</a><a href=/diagnostics>Diagnostics</a><a class=active href=/bench>Bench Test</a></nav></div></header><main><h1>Bench Sleep Test</h1><section class=card><h2>IMU-armed light sleep</h2><p class=sub>This stops BLE, Wi-Fi, and HX711 sampling, then enters the same light sleep used for battery operation. Move the board to wake it. The dashboard should return after wake when USB is connected or Maintenance Mode is active.</p><button id=sleep>Enter Light Sleep</button><div class=result id=result>Ready.</div></section><script>sleep.onclick=async()=>{sleep.disabled=true;result.textContent='Requesting sleep...';try{let r=await fetch('/bench/sleep',{method:'POST'});let d=await r.json();result.textContent=d.message+' Move the board after the page disconnects.'}catch(e){result.textContent=e.message}setTimeout(()=>sleep.disabled=false,4000)}</script></main></body></html>";
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, kPage, HTTPD_RESP_USE_STRLEN);
-}
-
 esp_err_t diagnosticsHandler(httpd_req_t *req) {
     return sendPage(req, webui::kDiagnosticsPage);
 }
@@ -327,6 +311,10 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   "\"provisional_angular_velocity_dps\":%.2f,\"provisional_cadence_rpm\":%.2f,"
                   "\"provisional_revolutions\":%u,\"provisional_confidence\":%.3f,"
                   "\"provisional_reason\":\"%s\","
+                  "\"ride_active\":%s,\"last_ride\":{\"valid\":%s,\"sequence\":%u,"
+                  "\"moving_seconds\":%u,\"elapsed_seconds\":%u,\"revolutions\":%u,"
+                  "\"average_power\":%.1f,\"maximum_power\":%d,\"average_cadence\":%.1f,"
+                  "\"maximum_cadence\":%.1f,\"work_kj\":%.2f,\"end_reason\":\"%s\"},"
                   "\"calibration\":{\"step\":\"%s\",\"result\":\"%s\",\"error\":\"%s\",\"active\":%s,\"valid\":%s,"
                   "\"mass_kg\":%.4f,\"lever_arm_mm\":%.2f,\"reference_torque_nm\":%.4f,\"raw_delta\":%.2f,"
                   "\"counts_per_nm\":%.4f,\"nm_per_count\":%.9f,\"verification_torque_nm\":%.4f,\"verification_error_percent\":%.2f,"
@@ -338,9 +326,11 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    "\"power_filter_alpha\":%.3f,\"maximum_valid_power_watts\":%u,"
                    "\"auto_ride_zero_enabled\":%s,\"ride_detection_enabled\":%s,"
                    "\"minimum_ride_duration_seconds\":%u,\"cadence_timeout_seconds\":%u,"
+                   "\"ride_zero_stationary_timeout_seconds\":%u,"
                    "\"imu_wake_threshold\":%u,\"imu_revolution_threshold_dps\":%.1f,"
+                   "\"minimum_cadence_rpm\":%u,\"maximum_cadence_rpm\":%u,"
                    "\"rotation_aware_power_enabled\":%s,\"ble_advertising_power_dbm\":%d,"
-                   "\"ble_auto_advertise_enabled\":%s,\"zero_offset\":%ld,\"calibration_zero\":%ld,"
+                   "\"zero_offset\":%ld,\"calibration_zero\":%ld,"
                    "\"counts_per_nm\":%.3f,\"torque_sign\":%ld,\"calibration_mass_kg\":%.4f,"
                    "\"calibration_lever_arm_mm\":%.2f}}",
                   static_cast<unsigned>(s.uptime_seconds), static_cast<double>(s.battery_voltage),
@@ -361,6 +351,12 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   static_cast<double>(s.provisional_angular_velocity_dps),
                   static_cast<double>(s.provisional_cadence_rpm), static_cast<unsigned>(s.provisional_revolutions),
                   static_cast<double>(s.provisional_confidence), s.provisional_reason,
+                  s.ride_active ? "true" : "false", s.last_ride.valid ? "true" : "false",
+                  static_cast<unsigned>(s.last_ride.sequence), static_cast<unsigned>(s.last_ride.moving_seconds),
+                  static_cast<unsigned>(s.last_ride.elapsed_seconds), static_cast<unsigned>(s.last_ride.crank_revolutions),
+                  static_cast<double>(s.last_ride.average_power_watts), static_cast<int>(s.last_ride.maximum_power_watts),
+                  static_cast<double>(s.last_ride.average_cadence_rpm), static_cast<double>(s.last_ride.maximum_cadence_rpm),
+                  static_cast<double>(s.last_ride.work_kj), s.last_ride.end_reason,
                   CalibrationManager::stepName(cal.step), cal.result, cal.error, cal.active ? "true" : "false",
                   cal.valid ? "true" : "false", cal.mass_kg, cal.lever_arm_mm, cal.reference_torque_nm,
                   cal.raw_delta, cal.counts_per_nm, cal.nm_per_count, cal.verification_torque_nm,
@@ -375,11 +371,13 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    static_cast<unsigned>(c.maximum_valid_power_watts),
                    c.auto_ride_zero_enabled ? "true" : "false", c.ride_detection_enabled ? "true" : "false",
                    static_cast<unsigned>(c.minimum_ride_duration_seconds),
-                   static_cast<unsigned>(c.cadence_timeout_seconds), static_cast<unsigned>(c.imu_wake_threshold),
+                   static_cast<unsigned>(c.cadence_timeout_seconds),
+                   static_cast<unsigned>(c.ride_zero_stationary_timeout_seconds),
+                   static_cast<unsigned>(c.imu_wake_threshold),
                    static_cast<double>(c.imu_revolution_threshold_dps),
+                   static_cast<unsigned>(c.minimum_cadence_rpm), static_cast<unsigned>(c.maximum_cadence_rpm),
                    c.rotation_aware_power_enabled ? "true" : "false",
                    static_cast<int>(c.ble_advertising_power_dbm),
-                   c.ble_auto_advertise_enabled ? "true" : "false",
                    static_cast<long>(c.runtime_zero_offset_counts),
                    static_cast<long>(c.calibration_zero_reference_counts), static_cast<double>(c.counts_per_nm),
                    static_cast<long>(c.torque_sign), static_cast<double>(c.calibration_mass_kg),
@@ -477,6 +475,7 @@ esp_err_t operatingModeHandler(httpd_req_t *req) {
     // Apply only after acknowledging the request. On battery, Normal Mode is
     // then free to close the web server without truncating this response.
     *g_portal->mutableConfig() = candidate;
+    g_portal->notifyConfigChanged();
     return response;
 }
 
@@ -507,6 +506,14 @@ esp_err_t saveHandler(httpd_req_t *req) {
     const std::string ble_name = formValue(body, "ble_name");
     const std::string power_alpha = formValue(body, "power_filter_alpha");
     const std::string maximum_power = formValue(body, "maximum_valid_power_watts");
+    const std::string minimum_ride = formValue(body, "minimum_ride_duration_seconds");
+    const std::string cadence_timeout = formValue(body, "cadence_timeout_seconds");
+    const std::string stationary_timeout = formValue(body, "ride_zero_stationary_timeout_seconds");
+    const std::string imu_wake_threshold = formValue(body, "imu_wake_threshold");
+    const std::string revolution_threshold = formValue(body, "imu_revolution_threshold_dps");
+    const std::string minimum_cadence = formValue(body, "minimum_cadence_rpm");
+    const std::string maximum_cadence = formValue(body, "maximum_cadence_rpm");
+    const std::string advertising_power = formValue(body, "ble_advertising_power_dbm");
 
     if (ssid.size() > 32) return badSetting(req, "Wi-Fi network name is too long");
     if (password.size() > 64) return badSetting(req, "Wi-Fi password is too long");
@@ -536,6 +543,31 @@ esp_err_t saveHandler(httpd_req_t *req) {
     if (!maximum_power.empty() && !parseUnsigned(maximum_power, 500, 5000, parsed_maximum)) {
         return badSetting(req, "Maximum believable power must be between 500 and 5000 watts");
     }
+    uint32_t parsed_minimum_ride = candidate.minimum_ride_duration_seconds;
+    uint32_t parsed_cadence_timeout = candidate.cadence_timeout_seconds;
+    uint32_t parsed_stationary_timeout = candidate.ride_zero_stationary_timeout_seconds;
+    uint32_t parsed_wake_threshold = candidate.imu_wake_threshold;
+    uint32_t parsed_minimum_cadence = candidate.minimum_cadence_rpm;
+    uint32_t parsed_maximum_cadence = candidate.maximum_cadence_rpm;
+    float parsed_revolution_threshold = candidate.imu_revolution_threshold_dps;
+    if (!parseUnsigned(minimum_ride, 30, 3600, parsed_minimum_ride))
+        return badSetting(req, "Minimum ride duration must be between 30 and 3600 seconds");
+    if (!parseUnsigned(cadence_timeout, 1, 60, parsed_cadence_timeout))
+        return badSetting(req, "Cadence timeout must be between 1 and 60 seconds");
+    if (!parseUnsigned(stationary_timeout, 10, 600, parsed_stationary_timeout))
+        return badSetting(req, "Ride Zero stationary delay must be between 10 and 600 seconds");
+    if (!parseUnsigned(imu_wake_threshold, 1, 63, parsed_wake_threshold))
+        return badSetting(req, "Motion sensitivity must be between 1 and 63");
+    if (!parseFloat(revolution_threshold, 20.0F, 2000.0F, parsed_revolution_threshold))
+        return badSetting(req, "Rotation threshold must be between 20 and 2000 degrees per second");
+    if (!parseUnsigned(minimum_cadence, 1, 120, parsed_minimum_cadence) ||
+        !parseUnsigned(maximum_cadence, parsed_minimum_cadence, 250, parsed_maximum_cadence))
+        return badSetting(req, "Cadence range must be between 1 and 250 RPM");
+    char *power_end = nullptr;
+    const long parsed_advertising_power = std::strtol(advertising_power.c_str(), &power_end, 10);
+    if (advertising_power.empty() || power_end == advertising_power.c_str() || *power_end != '\0' ||
+        parsed_advertising_power < -20 || parsed_advertising_power > 9)
+        return badSetting(req, "Bluetooth advertising power must be between -20 and 9 dBm");
 
     std::strncpy(candidate.wifi_ssid, ssid.c_str(), sizeof(candidate.wifi_ssid) - 1);
     // A blank password field means "leave the existing secret alone" so a
@@ -564,8 +596,18 @@ esp_err_t saveHandler(httpd_req_t *req) {
     }
     candidate.ride_diagnostics_enabled = body.find("ride_diagnostics=on") != std::string::npos;
     candidate.debug_logging_enabled = body.find("debug_logging=on") != std::string::npos;
+    candidate.auto_ride_zero_enabled = body.find("auto_ride_zero=on") != std::string::npos;
+    candidate.ride_detection_enabled = body.find("ride_detection=on") != std::string::npos;
     candidate.power_filter_alpha = parsed_alpha;
     candidate.maximum_valid_power_watts = static_cast<uint16_t>(parsed_maximum);
+    candidate.minimum_ride_duration_seconds = static_cast<uint16_t>(parsed_minimum_ride);
+    candidate.cadence_timeout_seconds = static_cast<uint16_t>(parsed_cadence_timeout);
+    candidate.ride_zero_stationary_timeout_seconds = static_cast<uint16_t>(parsed_stationary_timeout);
+    candidate.imu_wake_threshold = static_cast<uint8_t>(parsed_wake_threshold);
+    candidate.imu_revolution_threshold_dps = parsed_revolution_threshold;
+    candidate.minimum_cadence_rpm = static_cast<uint8_t>(parsed_minimum_cadence);
+    candidate.maximum_cadence_rpm = static_cast<uint8_t>(parsed_maximum_cadence);
+    candidate.ble_advertising_power_dbm = static_cast<int8_t>(parsed_advertising_power);
     candidate.force_setup_portal = false;
 
     esp_err_t err = g_portal->storage()->save(candidate);
@@ -576,6 +618,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
     const esp_err_t response = httpd_resp_sendstr(
         req, "{\"ok\":true,\"reboot_required\":true,\"message\":\"Settings saved\"}");
     *g_portal->mutableConfig() = candidate;
+    g_portal->notifyConfigChanged();
     return response;
 }
 
@@ -736,13 +779,8 @@ LiveStatus SetupWifi::liveStatus() const {
     return live_status_;
 }
 
-void SetupWifi::requestBenchLightSleep() {
-    bench_light_sleep_requested_.store(true);
-}
-
-bool SetupWifi::consumeBenchLightSleepRequest() {
-    return bench_light_sleep_requested_.exchange(false);
-}
+bool SetupWifi::consumeConfigChanged() { return config_changed_.exchange(false); }
+void SetupWifi::notifyConfigChanged() { config_changed_.store(true); }
 
 void SetupWifi::observeCalibration(bool attempted, bool success, int32_t raw, bool hx_ready, int64_t now_us) {
     calibration_.observe(attempted, success, raw, hx_ready, now_us,
@@ -801,8 +839,6 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
     httpd_uri_t diagnostics{.uri = "/diagnostics", .method = HTTP_GET, .handler = diagnosticsHandler, .user_ctx = nullptr};
     httpd_uri_t calibration{.uri = "/calibration", .method = HTTP_GET, .handler = calibrationHandler, .user_ctx = nullptr};
-    httpd_uri_t bench{.uri = "/bench", .method = HTTP_GET, .handler = benchHandler, .user_ctx = nullptr};
-    httpd_uri_t bench_sleep{.uri = "/bench/sleep", .method = HTTP_POST, .handler = benchSleepHandler, .user_ctx = nullptr};
     httpd_uri_t ota_page{.uri = "/ota", .method = HTTP_GET, .handler = otaPageHandler, .user_ctx = nullptr};
     httpd_uri_t ota_upload{.uri = "/ota/upload", .method = HTTP_POST, .handler = otaUploadHandler, .user_ctx = nullptr};
     httpd_uri_t cal_start{.uri = "/api/calibration/start", .method = HTTP_POST, .handler = calibrationStartHandler, .user_ctx = nullptr};
@@ -824,8 +860,6 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &diagnostics), kTag, "diagnostics handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &calibration), kTag, "calibration handler");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bench), kTag, "bench handler");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bench_sleep), kTag, "bench sleep handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ota_page), kTag, "ota page handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ota_upload), kTag, "ota upload handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_start), kTag, "cal start");

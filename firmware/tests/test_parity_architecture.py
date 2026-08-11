@@ -117,7 +117,7 @@ class ParityArchitectureTests(unittest.TestCase):
         config = (SRC / "config.h").read_text()
         storage = (SRC / "settings_storage.cpp").read_text()
         web = (SRC / "setup_wifi.cpp").read_text()
-        self.assertIn("static constexpr uint32_t kVersion = 10", config)
+        self.assertIn("static constexpr uint32_t kVersion = 11", config)
         self.assertIn("OperatingMode operating_mode", config)
         for field in (
             "debug_logging_enabled",
@@ -126,7 +126,7 @@ class ParityArchitectureTests(unittest.TestCase):
             "minimum_ride_duration_seconds",
             "cadence_timeout_seconds",
             "ble_advertising_power_dbm",
-            "ble_auto_advertise_enabled",
+            "reserved_legacy_ble_auto_advertise_enabled",
         ):
             self.assertIn(field, config)
         self.assertIn("DeviceConfig candidate = current", web)
@@ -138,18 +138,24 @@ class ParityArchitectureTests(unittest.TestCase):
         ui = (SRC / "web_ui.cpp").read_text()
         for active in (
             "name=ble_name",
+            "name=ble_advertising_power_dbm",
             "name=power_filter_alpha",
             "name=maximum_valid_power_watts",
             "name=ride_diagnostics",
+            "name=auto_ride_zero",
+            "name=ride_detection",
+            "name=imu_wake_threshold",
+            "name=cadence_timeout_seconds",
+            "name=debug_logging",
         ):
             self.assertIn(active, ui)
-        for unsupported in (
-            "Automatic Ride Zero</label><p class=sub>Requires validated",
-            "Automatic ride detection</label><p class=sub>Requires ride-lifecycle",
-            "id=motionSensitivity disabled",
-            "id=debugLogging type=checkbox disabled",
-        ):
-            self.assertIn(unsupported, ui)
+        self.assertIn("id=rotationAware type=checkbox disabled", ui)
+
+    def test_obsolete_bench_sleep_route_is_absent(self):
+        server = (SRC / "setup_wifi.cpp").read_text()
+        main = (SRC / "main.cpp").read_text()
+        self.assertNotIn('"/bench"', server)
+        self.assertNotIn("consumeBenchLightSleepRequest", main)
 
     def test_ride_diagnostics_controls_runtime_logging(self):
         main = (SRC / "main.cpp").read_text()

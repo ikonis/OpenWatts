@@ -1,5 +1,7 @@
 #include "cadence_estimator.h"
 
+#include <cmath>
+
 namespace openwatts {
 
 void CadenceEstimator::updateConfig(const DeviceConfig &config) {
@@ -24,14 +26,18 @@ CadenceState CadenceEstimator::update(const ImuSample &sample, int64_t now_us) {
 
         if (previous_revolution_us_ > 0 && latest_.last_revolution_us > previous_revolution_us_) {
             const int64_t period_us = latest_.last_revolution_us - previous_revolution_us_;
-            latest_.rpm = 60000000.0F / static_cast<float>(period_us);
+            const float candidate_rpm = 60000000.0F / static_cast<float>(period_us);
+            latest_.rpm = std::isfinite(candidate_rpm) &&
+                                  candidate_rpm >= config_.minimum_cadence_rpm &&
+                                  candidate_rpm <= config_.maximum_cadence_rpm
+                              ? candidate_rpm : 0.0F;
         }
     } else if (gyro_z < (config_.imu_revolution_threshold_dps * 0.25F)) {
         armed_ = true;
     }
 
     if (latest_.last_revolution_us == 0 ||
-        (now_us - latest_.last_revolution_us) > static_cast<int64_t>(config_.inactivity_timeout_ms) * 1000LL) {
+        (now_us - latest_.last_revolution_us) > static_cast<int64_t>(config_.cadence_timeout_seconds) * 1000000LL) {
         latest_.rpm = 0.0F;
     }
     latest_.moving = latest_.rpm > 0.1F;

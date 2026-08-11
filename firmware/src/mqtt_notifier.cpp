@@ -10,13 +10,30 @@ namespace {
 constexpr char kTag[] = "mqtt";
 
 void publishDiscovery(esp_mqtt_client_handle_t client, const char *state_topic) {
-    struct Entity { const char *id; const char *name; const char *key; const char *unit; const char *device_class; };
+    struct Entity {
+        const char *id;
+        const char *name;
+        const char *key;
+        const char *unit;
+        const char *device_class;
+        bool measurement;
+        bool ride_only;
+    };
     static constexpr Entity entities[] = {
-        {"battery_voltage", "Battery Voltage", "battery_voltage", "V", "voltage"},
-        {"battery_estimated", "Estimated Battery", "estimated_percent", "%", "battery"},
-        {"battery_status", "Battery State", "battery_status", "", ""},
-        {"firmware_version", "Firmware Version", "firmware_version", "", ""},
-        {"device_health", "Device Health", "device_health", "", ""},
+        {"battery_voltage", "Battery Voltage", "battery_voltage", "V", "voltage", true, false},
+        {"battery_estimated", "Estimated Battery", "estimated_percent", "%", "battery", true, false},
+        {"battery_status", "Battery State", "battery_status", "", "", false, false},
+        {"firmware_version", "Firmware Version", "firmware_version", "", "", false, false},
+        {"device_health", "Device Health", "device_health", "", "", false, false},
+        {"last_ride_moving", "Last Ride Moving Time", "last_ride_moving_seconds", "s", "duration", true, true},
+        {"last_ride_elapsed", "Last Ride Elapsed Time", "last_ride_elapsed_seconds", "s", "duration", true, true},
+        {"last_ride_average_power", "Last Ride Average Power", "last_ride_average_power", "W", "power", true, true},
+        {"last_ride_peak_power", "Last Ride Peak Power", "last_ride_peak_power", "W", "power", true, true},
+        {"last_ride_average_cadence", "Last Ride Average Cadence", "last_ride_average_cadence", "rpm", "", true, true},
+        {"last_ride_peak_cadence", "Last Ride Peak Cadence", "last_ride_peak_cadence", "rpm", "", true, true},
+        {"last_ride_revolutions", "Last Ride Revolutions", "last_ride_revolutions", "rev", "", true, true},
+        {"last_ride_work", "Last Ride Work", "last_ride_work_kj", "kJ", "energy", true, true},
+        {"last_ride_end_reason", "Last Ride End Reason", "last_ride_end_reason", "", "", false, true},
     };
     char topic[128]{};
     char payload[640]{};
@@ -24,14 +41,27 @@ void publishDiscovery(esp_mqtt_client_handle_t client, const char *state_topic) 
         std::snprintf(topic, sizeof(topic), "homeassistant/sensor/openwatts/%s/config", entity.id);
         char optional[160]{};
         if (entity.unit[0] != '\0') {
-            std::snprintf(optional, sizeof(optional), "\"unit_of_measurement\":\"%s\",\"state_class\":\"measurement\",\"device_class\":\"%s\",", entity.unit, entity.device_class);
+            std::snprintf(optional, sizeof(optional),
+                          "\"unit_of_measurement\":\"%s\",%s%s%s",
+                          entity.unit,
+                          entity.measurement ? "\"state_class\":\"measurement\"," : "",
+                          entity.device_class[0] != '\0' ? "\"device_class\":\"" : "",
+                          entity.device_class[0] != '\0' ? entity.device_class : "");
+            if (entity.device_class[0] != '\0') std::strncat(optional, "\",", sizeof(optional) - std::strlen(optional) - 1);
+        }
+        char availability[160]{};
+        if (entity.ride_only) {
+            std::snprintf(availability, sizeof(availability),
+                          "\"availability_topic\":\"%s\","
+                          "\"availability_template\":\"{{ 'online' if value_json.last_ride_valid else 'offline' }}\",",
+                          state_topic);
         }
         std::snprintf(payload, sizeof(payload),
                       "{\"name\":\"%s\",\"unique_id\":\"openwatts_%s\",\"state_topic\":\"%s\","
-                      "\"value_template\":\"{{ value_json.%s }}\",%s"
+                      "\"value_template\":\"{{ value_json.%s }}\",%s%s"
                       "\"device\":{\"identifiers\":[\"openwatts\"],\"name\":\"OpenWatts\","
-                      "\"manufacturer\":\"ikonis\",\"model\":\"OpenWatts Cycling Power Meter\"}}",
-                      entity.name, entity.id, state_topic, entity.key, optional);
+                      "\"manufacturer\":\"OpenWatts\",\"model\":\"OpenWatts Cycling Power Meter\"}}",
+                      entity.name, entity.id, state_topic, entity.key, optional, availability);
         esp_mqtt_client_publish(client, topic, payload, 0, 1, true);
     }
 }

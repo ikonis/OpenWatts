@@ -12,6 +12,7 @@ namespace {
 constexpr char kTag[] = "settings";
 constexpr char kNamespace[] = "openwatts";
 constexpr char kConfigKey[] = "config";
+constexpr char kLastRideKey[] = "last_ride";
 
 DeviceConfig sanitized(DeviceConfig config) {
     if (config.magic != DeviceConfig::kMagic || config.version > DeviceConfig::kVersion) {
@@ -74,6 +75,8 @@ DeviceConfig sanitized(DeviceConfig config) {
     config.rotation_confidence_threshold_percent =
         std::clamp<uint8_t>(config.rotation_confidence_threshold_percent, 1, 100);
     config.imu_stationary_timeout_ms = std::clamp<uint16_t>(config.imu_stationary_timeout_ms, 250, 30000);
+    config.ride_zero_stationary_timeout_seconds =
+        std::clamp<uint16_t>(config.ride_zero_stationary_timeout_seconds, 10, 600);
     if (!std::isfinite(config.counts_per_nm) || config.counts_per_nm <= 0.0F) {
         config.strain_calibration_valid = false;
         config.counts_per_nm = 10000.0F;
@@ -152,6 +155,29 @@ esp_err_t SettingsStorage::markSelfTestDone(DeviceConfig &config) {
     config.self_test_done = true;
     config.run_self_test_on_boot = false;
     return save(config);
+}
+
+LastRideSummary SettingsStorage::loadLastRide() {
+    LastRideSummary summary{};
+    if (!initialized_) return summary;
+    nvs_handle_t handle = 0;
+    if (nvs_open(kNamespace, NVS_READONLY, &handle) != ESP_OK) return summary;
+    size_t size = sizeof(summary);
+    const esp_err_t err = nvs_get_blob(handle, kLastRideKey, &summary, &size);
+    nvs_close(handle);
+    if (err != ESP_OK || size != sizeof(summary) ||
+        summary.schema_version != LastRideSummary::kSchemaVersion) return LastRideSummary{};
+    return summary;
+}
+
+esp_err_t SettingsStorage::saveLastRide(const LastRideSummary &summary) {
+    if (!initialized_) return ESP_ERR_INVALID_STATE;
+    nvs_handle_t handle = 0;
+    esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &handle);
+    if (err == ESP_OK) err = nvs_set_blob(handle, kLastRideKey, &summary, sizeof(summary));
+    if (err == ESP_OK) err = nvs_commit(handle);
+    if (handle != 0) nvs_close(handle);
+    return err;
 }
 
 }  // namespace openwatts
