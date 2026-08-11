@@ -7,10 +7,11 @@
 
 namespace openwatts {
 
-enum class RideZeroTrigger : uint8_t { UsbRemoved, BleConnected, BleDisconnected, BeforeSleep, Stationary };
+enum class RideZeroTrigger : uint8_t { UsbRemoved, UsbInserted, BleConnected, BleDisconnected, BeforeSleep, Stationary };
 enum class RideZeroResult : uint8_t {
     Accepted, Disabled, Locked, CalibrationRequired, SensorUnavailable,
-    CadenceActive, BleRideActive, InsufficientSamples, UnstableStrain, InvalidData,
+    CadenceActive, BleRideActive, ImuUnstable, InsufficientSamples, UnstableStrain,
+    LoadedReference, InvalidData,
 };
 
 struct RideZeroAttempt {
@@ -19,16 +20,18 @@ struct RideZeroAttempt {
     int32_t zero_offset = 0;
     float average = 0.0F;
     float variance = 0.0F;
+    float standard_deviation = 0.0F;
+    float range = 0.0F;
     uint32_t samples = 0;
 };
 
 class RideZeroController {
 public:
-    static constexpr uint32_t kWindowSize = 32;
-    static constexpr uint32_t kMinimumSamples = 16;
+    static constexpr uint32_t kWindowSize = 64;
+    static constexpr uint32_t kMinimumSamples = 32;
     void observe(float filtered_counts, bool fresh, int64_t now_us);
     RideZeroAttempt attempt(RideZeroTrigger trigger, const DeviceConfig &config,
-                            const PowerSample &sample, bool ble_ride_active,
+                            const PowerSample &sample, bool ble_ride_active, bool imu_stationary,
                             bool calibration_active, int64_t now_us);
     void lock();
     void resetLifecycle();

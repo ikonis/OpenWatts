@@ -3,11 +3,12 @@
 #include <cstdint>
 
 #include "power_estimator.h"
+#include "road_speed_model.h"
 
 namespace openwatts {
 
 struct LastRideSummary {
-    static constexpr uint32_t kSchemaVersion = 1;
+    static constexpr uint32_t kSchemaVersion = 2;
     uint32_t schema_version = kSchemaVersion;
     uint32_t sequence = 0;
     uint32_t moving_seconds = 0;
@@ -20,12 +21,18 @@ struct LastRideSummary {
     float work_kj = 0.0F;
     bool valid = false;
     char end_reason[24] = "none";
+    float estimated_distance_meters = 0.0F;
+    float average_estimated_speed_mps = 0.0F;
+    float maximum_estimated_speed_mps = 0.0F;
+    uint16_t road_model_version = 0;
+    float rider_mass_kg = 0.0F;
 };
 
 class RideLog {
 public:
     void begin(const LastRideSummary &stored);
-    bool update(const PowerSample &sample, int64_t now_us, uint32_t qualification_seconds);
+    bool update(const PowerSample &sample, int64_t now_us, uint32_t qualification_seconds,
+                float rider_mass_kg);
     void clear();
     const LastRideSummary &lastRide() const;
     bool candidate() const;
@@ -50,6 +57,9 @@ private:
     double cadence_rpm_seconds_ = 0.0;
     float max_power_ = 0.0F;
     float max_cadence_ = 0.0F;
+    double estimated_distance_meters_ = 0.0;
+    float maximum_estimated_speed_mps_ = 0.0F;
+    float rider_mass_kg_ = 0.0F;
 };
 
 }  // namespace openwatts

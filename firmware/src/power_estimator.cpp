@@ -72,13 +72,16 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
         reset();
         return latest_;
     }
-    if (latest_.torque_nm < 0.0F) {
-        reject(PowerRejectionReason::NegativeTorque);
-        return latest_;
+    if (std::isfinite(cadence.forward_delta_radians) && cadence.forward_delta_radians > 0.0F) {
+        // Recovery-phase and bridge-sign excursions are not useful propulsive
+        // torque. Ignore them without replacing the current BLE power value
+        // with zero; the completed revolution produces the next update.
+        revolution_work_joules_ += std::max(0.0F, latest_.torque_nm) * cadence.forward_delta_radians;
+        revolution_angle_radians_ += cadence.forward_delta_radians;
     }
     if (!cadence.moving || !std::isfinite(cadence.rpm) || cadence.rpm <= 0.0F || cadence.rpm > 250.0F) {
         reject(PowerRejectionReason::InvalidCadence);
-        reset();
+        if (cadence.forward_delta_radians <= 0.0F) reset();
         return latest_;
     }
     if (cadence.last_revolution_us <= 0) {
@@ -86,7 +89,17 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
         reset();
         return latest_;
     }
-    const float watts = latest_.torque_nm * cadence.rpm * 2.0F * kPi / 60.0F;
+    if (!cadence.revolution_completed || cadence.revolution_duration_us <= 0 ||
+        revolution_angle_radians_ < (2.0F * kPi * 0.90F)) {
+        latest_.power_watts = has_filtered_power_
+            ? static_cast<int16_t>(std::clamp(std::lround(filtered_power_), 0L, 32767L)) : 0;
+        latest_.valid = has_filtered_power_;
+        return latest_;
+    }
+    const float duration_seconds = static_cast<float>(cadence.revolution_duration_us) / 1000000.0F;
+    const float watts = std::max(0.0F, revolution_work_joules_ / duration_seconds);
+    revolution_work_joules_ = 0.0F;
+    revolution_angle_radians_ = 0.0F;
     if (!std::isfinite(watts)) {
         reject(PowerRejectionReason::NonFinitePower);
         return latest_;
@@ -125,6 +138,8 @@ void PowerEstimator::reset() {
     median_index_ = 0;
     has_filtered_power_ = false;
     filtered_power_ = 0.0F;
+    revolution_work_joules_ = 0.0F;
+    revolution_angle_radians_ = 0.0F;
 }
 
 const char *PowerEstimator::rejectionName(PowerRejectionReason reason) {

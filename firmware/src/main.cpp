@@ -47,7 +47,7 @@ openwatts::MqttNotifier g_mqtt;
 openwatts::RideLog g_ride_log;
 openwatts::RideZeroController g_ride_zero;
 bool g_mqtt_discovery_pending = true;
-char g_mqtt_payload[896]{};
+char g_mqtt_payload[1280]{};
 openwatts::ReportHistory g_report_history{};
 openwatts::ReportReason g_pending_report_reason = openwatts::ReportReason::None;
 bool g_timer_decision_pending = false;
@@ -146,6 +146,9 @@ bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::Bat
                   "\"last_ride_revolutions\":%u,\"last_ride_average_power\":%.1f,"
                   "\"last_ride_peak_power\":%d,\"last_ride_average_cadence\":%.1f,"
                   "\"last_ride_peak_cadence\":%.1f,\"last_ride_work_kj\":%.2f,"
+                  "\"last_ride_estimated_distance_m\":%.2f,\"last_ride_average_speed_mps\":%.3f,"
+                  "\"last_ride_peak_speed_mps\":%.3f,\"last_ride_road_model_version\":%u,"
+                  "\"last_ride_rider_mass_kg\":%.2f,"
                   "\"last_ride_end_reason\":\"%s\"}",
                   OPENWATTS_FIRMWARE_VERSION, battery.voltage,
                   static_cast<unsigned>(battery.estimated_percent),
@@ -157,7 +160,10 @@ bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::Bat
                   static_cast<unsigned>(ride.sequence), static_cast<unsigned>(ride.moving_seconds),
                   static_cast<unsigned>(ride.elapsed_seconds), static_cast<unsigned>(ride.crank_revolutions),
                   ride.average_power_watts, static_cast<int>(ride.maximum_power_watts),
-                  ride.average_cadence_rpm, ride.maximum_cadence_rpm, ride.work_kj, ride.end_reason);
+                  ride.average_cadence_rpm, ride.maximum_cadence_rpm, ride.work_kj,
+                  ride.estimated_distance_meters, ride.average_estimated_speed_mps,
+                  ride.maximum_estimated_speed_mps, static_cast<unsigned>(ride.road_model_version),
+                  ride.rider_mass_kg, ride.end_reason);
     const esp_err_t mqtt_err = g_mqtt.begin(g_config.mqtt_host, g_config.mqtt_port, g_config.mqtt_topic,
                                             g_mqtt_payload, g_mqtt_discovery_pending);
     g_report_history.last_attempt_seconds = static_cast<uint64_t>(now_us / 1000000LL);
@@ -185,25 +191,44 @@ void finishBatteryReport(const openwatts::BatteryReading &battery, openwatts::Ba
     g_mqtt.stop();
 }
 
-void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerSample &sample, int64_t now_us) {
+void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerSample &sample,
+                     bool imu_stationary, int64_t now_us) {
     const openwatts::RideZeroAttempt attempt = g_ride_zero.attempt(
-        trigger, g_config, sample, g_ride_log.active(), g_setup_wifi.calibrationSnapshot().active, now_us);
+        trigger, g_config, sample, g_ride_log.active(), imu_stationary,
+        g_setup_wifi.calibrationSnapshot().active, now_us);
     if (g_config.ride_diagnostics_enabled) {
-        ESP_LOGI(kTag, "Ride Zero: trigger=%s result=%s mean=%.1f variance=%.1f samples=%u locked=%d",
+        ESP_LOGI(kTag, "Ride Zero: trigger=%s result=%s mean=%.1f stddev=%.1f range=%.1f samples=%u locked=%d",
                  openwatts::RideZeroController::triggerName(trigger),
-                 openwatts::RideZeroController::resultName(attempt.result), attempt.average, attempt.variance,
+                 openwatts::RideZeroController::resultName(attempt.result), attempt.average,
+                 attempt.standard_deviation, attempt.range,
                  static_cast<unsigned>(attempt.samples), g_ride_zero.locked() ? 1 : 0);
     }
     if (attempt.result != openwatts::RideZeroResult::Accepted) return;
     openwatts::DeviceConfig candidate = g_config;
     candidate.runtime_zero_offset_counts = attempt.zero_offset;
     candidate.zero_offset_counts = attempt.zero_offset;
-    const esp_err_t err = g_settings.save(candidate);
+    constexpr float kBaselineLearningAlpha = 0.10F;
+    candidate.ride_zero_baseline_stddev_counts = candidate.ride_zero_baseline_stddev_counts > 0.0F
+        ? candidate.ride_zero_baseline_stddev_counts * (1.0F - kBaselineLearningAlpha) +
+              attempt.standard_deviation * kBaselineLearningAlpha
+        : attempt.standard_deviation;
+    candidate.ride_zero_baseline_range_counts = candidate.ride_zero_baseline_range_counts > 0.0F
+        ? candidate.ride_zero_baseline_range_counts * (1.0F - kBaselineLearningAlpha) +
+              attempt.range * kBaselineLearningAlpha
+        : attempt.range;
+    // Stationary tracking can run for hours in Maintenance Mode. Apply those
+    // trusted corrections in RAM without consuming NVS erase/write cycles.
+    // Persist only at lifecycle boundaries that establish the next ride's
+    // reference or precede shutdown.
+    const bool persist = trigger != openwatts::RideZeroTrigger::Stationary &&
+                         trigger != openwatts::RideZeroTrigger::BleConnected;
+    const esp_err_t err = persist ? g_settings.save(candidate) : ESP_OK;
     if (err == ESP_OK) {
         g_config = candidate;
         g_power.updateConfig(g_config);
+        g_power.reset();
     } else {
-        ESP_LOGW(kTag, "Ride Zero save failed: %s", esp_err_to_name(err));
+        ESP_LOGW(kTag, "Ride Zero%s failed: %s", persist ? " save" : " update", esp_err_to_name(err));
     }
 }
 }  // namespace
@@ -278,6 +303,11 @@ extern "C" void app_main() {
     bool previous_usb_present = usb_present;
     bool previous_ble_connected = false;
     int64_t usb_removed_zero_due_us = 0;
+    // A reboot while USB remains connected has no GPIO edge. Schedule the
+    // same stable-zero opportunity explicitly after enough fresh HX711 data.
+    int64_t usb_inserted_zero_due_us = usb_present ? esp_timer_get_time() + 4000000LL : 0;
+    int64_t ble_zero_due_us = 0;
+    int64_t last_imu_motion_us = esp_timer_get_time();
     int64_t stationary_since_us = 0;
     bool stationary_zero_attempted = false;
     while (true) {
@@ -347,6 +377,12 @@ extern "C" void app_main() {
         g_imu.read(imu_sample);
 
         const int64_t now_us = esp_timer_get_time();
+        if (imu_sample.valid) {
+            const float maximum_gyro = std::max(std::fabs(imu_sample.gyro_dps[0]),
+                std::max(std::fabs(imu_sample.gyro_dps[1]), std::fabs(imu_sample.gyro_dps[2])));
+            if (maximum_gyro > 3.0F) last_imu_motion_us = now_us;
+        }
+        const bool imu_stationary = imu_sample.valid && now_us - last_imu_motion_us >= 2000000LL;
         const bool current_usb_present = openwatts::board::usbPresent();
         openwatts::ledStatus().setAutomaticState(
             current_usb_present, openwatts::OperatingPolicy::permitsMaintenanceTools(g_config),
@@ -367,6 +403,7 @@ extern "C" void app_main() {
             if (current_usb_present) {
                 g_ride_zero.resetLifecycle();
                 usb_removed_zero_due_us = 0;
+                usb_inserted_zero_due_us = now_us + 2000000LL;
                 const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, true, false);
                 if (wifi_err != ESP_OK) {
                     ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
@@ -417,15 +454,26 @@ extern "C" void app_main() {
                                                              g_hx711.ready(), cadence);
         g_ride_zero.observe(g_hx711.filtered(), hx_ok, now_us);
         if (usb_removed_zero_due_us != 0 && now_us >= usb_removed_zero_due_us) {
-            attemptRideZero(openwatts::RideZeroTrigger::UsbRemoved, sample, now_us);
+            attemptRideZero(openwatts::RideZeroTrigger::UsbRemoved, sample, imu_stationary, now_us);
             usb_removed_zero_due_us = 0;
+        }
+        if (usb_inserted_zero_due_us != 0 && now_us >= usb_inserted_zero_due_us) {
+            attemptRideZero(openwatts::RideZeroTrigger::UsbInserted, sample, imu_stationary, now_us);
+            usb_inserted_zero_due_us = 0;
         }
         const bool ble_connected = g_ble.connected();
         if (ble_connected != previous_ble_connected) {
+            // Connecting an app commonly coincides with clipping in or moving
+            // the crank. Observe a quiet window before judging Ride Zero.
+            ble_zero_due_us = now_us + 3000000LL;
+            if (!ble_connected) g_ride_zero.resetLifecycle();
+            previous_ble_connected = ble_connected;
+        }
+        if (ble_zero_due_us != 0 && now_us >= ble_zero_due_us) {
             attemptRideZero(ble_connected ? openwatts::RideZeroTrigger::BleConnected
                                           : openwatts::RideZeroTrigger::BleDisconnected,
-                            sample, now_us);
-            previous_ble_connected = ble_connected;
+                            sample, imu_stationary, now_us);
+            ble_zero_due_us = 0;
         }
         if (g_config.strain_calibration_valid && cadence.moving) {
             g_ride_zero.lock();
@@ -433,14 +481,21 @@ extern "C" void app_main() {
             stationary_zero_attempted = false;
         } else if (!cadence.moving) {
             if (stationary_since_us == 0) stationary_since_us = now_us;
-            if (!stationary_zero_attempted && now_us - stationary_since_us >=
+            const bool continuous_zero_allowed = current_usb_present ||
+                openwatts::OperatingPolicy::isMaintenance(g_config);
+            if (continuous_zero_allowed && !stationary_zero_attempted && now_us - stationary_since_us >=
                     static_cast<int64_t>(g_config.ride_zero_stationary_timeout_seconds) * 1000000LL) {
-                attemptRideZero(openwatts::RideZeroTrigger::Stationary, sample, now_us);
-                stationary_zero_attempted = true;
+                attemptRideZero(openwatts::RideZeroTrigger::Stationary, sample, imu_stationary, now_us);
+                // Continue checking only at the configured interval. This
+                // follows slow unloaded thermal drift without chasing zero
+                // every sample; cadence immediately locks the lifecycle.
+                stationary_since_us = now_us;
+                stationary_zero_attempted = false;
             }
         }
         if (g_config.ride_detection_enabled && g_config.strain_calibration_valid) {
-            const bool ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds);
+            const bool ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds,
+                                                          g_config.rider_mass_kg);
             if (ride_completed) g_ride_zero.resetLifecycle();
             if (g_ride_log.completedPendingSave()) {
                 const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
@@ -538,9 +593,16 @@ extern "C" void app_main() {
         // Begin the inactivity path only after the app disconnects.
         // Maintenance deliberately keeps the runtime awake; entering light
         // sleep would immediately tear down the web server and radio.
+        // A qualified ride owns the runtime until its stationary completion
+        // window closes. After persistence, keep the runtime alive until the
+        // queued ride MQTT report has finished; otherwise Normal Mode's short
+        // idle timeout could sleep before the summary is saved or published.
+        const bool ride_finalize_pending = g_ride_log.active();
+        const bool report_pending = g_pending_report_reason != openwatts::ReportReason::None || g_mqtt.running();
         if (openwatts::OperatingPolicy::permitsInactivitySleep(g_config) && !current_usb_present && !g_ble.connected() &&
+            !ride_finalize_pending && !report_pending &&
             g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
-            attemptRideZero(openwatts::RideZeroTrigger::BeforeSleep, sample, now_us);
+            attemptRideZero(openwatts::RideZeroTrigger::BeforeSleep, sample, imu_stationary, now_us);
             openwatts::PowerManager::WakeResult wake_result{};
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu, &wake_result);
             if (sleep_err != ESP_OK) {

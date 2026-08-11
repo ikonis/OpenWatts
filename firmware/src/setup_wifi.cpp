@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <array>
 #include <string>
 
 #include "esp_check.h"
@@ -41,6 +42,20 @@ TaskHandle_t g_dns_task = nullptr;
 SetupWifi *g_portal = nullptr;
 esp_timer_handle_t g_station_retry_timer = nullptr;
 char g_status_json[7000]{};
+
+struct ImuCaptureSample {
+    uint32_t elapsed_ms;
+    float accel[3];
+    float gyro[3];
+};
+
+constexpr size_t kImuCaptureCapacity = 1200;
+constexpr int64_t kImuCaptureIntervalUs = 50000;
+std::array<ImuCaptureSample, kImuCaptureCapacity> g_imu_capture{};
+std::atomic<bool> g_imu_capture_active{false};
+std::atomic<size_t> g_imu_capture_count{0};
+int64_t g_imu_capture_started_us = 0;
+int64_t g_imu_capture_last_sample_us = 0;
 
 esp_err_t sendPage(httpd_req_t *req, const char *page) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -323,7 +338,9 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   "\"ride_active\":%s,\"last_ride\":{\"valid\":%s,\"sequence\":%u,"
                   "\"moving_seconds\":%u,\"elapsed_seconds\":%u,\"revolutions\":%u,"
                   "\"average_power\":%.1f,\"maximum_power\":%d,\"average_cadence\":%.1f,"
-                  "\"maximum_cadence\":%.1f,\"work_kj\":%.2f,\"end_reason\":\"%s\"},"
+                  "\"maximum_cadence\":%.1f,\"work_kj\":%.2f,\"end_reason\":\"%s\","
+                  "\"estimated_distance_meters\":%.2f,\"average_estimated_speed_mps\":%.3f,"
+                  "\"maximum_estimated_speed_mps\":%.3f,\"road_model_version\":%u,\"rider_mass_kg\":%.2f},"
                   "\"calibration\":{\"step\":\"%s\",\"result\":\"%s\",\"error\":\"%s\",\"active\":%s,\"valid\":%s,"
                   "\"mass_kg\":%.4f,\"lever_arm_mm\":%.2f,\"reference_torque_nm\":%.4f,\"raw_delta\":%.2f,"
                   "\"counts_per_nm\":%.4f,\"nm_per_count\":%.9f,\"verification_torque_nm\":%.4f,\"verification_error_percent\":%.2f,"
@@ -336,6 +353,8 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    "\"auto_ride_zero_enabled\":%s,\"ride_detection_enabled\":%s,"
                    "\"minimum_ride_duration_seconds\":%u,\"cadence_timeout_seconds\":%u,"
                    "\"ride_zero_stationary_timeout_seconds\":%u,"
+                   "\"ride_zero_baseline_stddev_counts\":%.2f,\"ride_zero_baseline_range_counts\":%.2f,"
+                   "\"unit_system\":\"%s\",\"rider_mass_kg\":%.2f,"
                    "\"imu_wake_threshold\":%u,\"imu_revolution_threshold_dps\":%.1f,"
                    "\"minimum_cadence_rpm\":%u,\"maximum_cadence_rpm\":%u,"
                    "\"rotation_aware_power_enabled\":%s,\"ble_advertising_power_dbm\":%d,"
@@ -366,6 +385,11 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   static_cast<double>(s.last_ride.average_power_watts), static_cast<int>(s.last_ride.maximum_power_watts),
                   static_cast<double>(s.last_ride.average_cadence_rpm), static_cast<double>(s.last_ride.maximum_cadence_rpm),
                   static_cast<double>(s.last_ride.work_kj), s.last_ride.end_reason,
+                  static_cast<double>(s.last_ride.estimated_distance_meters),
+                  static_cast<double>(s.last_ride.average_estimated_speed_mps),
+                  static_cast<double>(s.last_ride.maximum_estimated_speed_mps),
+                  static_cast<unsigned>(s.last_ride.road_model_version),
+                  static_cast<double>(s.last_ride.rider_mass_kg),
                   CalibrationManager::stepName(cal.step), cal.result, cal.error, cal.active ? "true" : "false",
                   cal.valid ? "true" : "false", cal.mass_kg, cal.lever_arm_mm, cal.reference_torque_nm,
                   cal.raw_delta, cal.counts_per_nm, cal.nm_per_count, cal.verification_torque_nm,
@@ -382,6 +406,9 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    static_cast<unsigned>(c.minimum_ride_duration_seconds),
                    static_cast<unsigned>(c.cadence_timeout_seconds),
                    static_cast<unsigned>(c.ride_zero_stationary_timeout_seconds),
+                   static_cast<double>(c.ride_zero_baseline_stddev_counts),
+                   static_cast<double>(c.ride_zero_baseline_range_counts),
+                   c.imperial_units ? "imperial" : "metric", static_cast<double>(c.rider_mass_kg),
                    static_cast<unsigned>(c.imu_wake_threshold),
                    static_cast<double>(c.imu_revolution_threshold_dps),
                    static_cast<unsigned>(c.minimum_cadence_rpm), static_cast<unsigned>(c.maximum_cadence_rpm),
@@ -448,6 +475,66 @@ esp_err_t calibrationResetHandler(httpd_req_t *req) {
     return actionResponse(req, g_portal->calibrationReset(), "Saved calibration reset");
 }
 esp_err_t imuResetHandler(httpd_req_t *req) { g_portal->resetImuTracker(); return actionResponse(req, ESP_OK, "Provisional tracker reset"); }
+
+esp_err_t imuCaptureStartHandler(httpd_req_t *req) {
+    if (g_portal == nullptr || g_portal->mutableConfig() == nullptr ||
+        !OperatingPolicy::isMaintenance(*g_portal->mutableConfig())) {
+        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Maintenance Mode is required");
+    }
+    g_imu_capture_active.store(false);
+    g_imu_capture_count.store(0);
+    g_imu_capture_started_us = esp_timer_get_time();
+    g_imu_capture_last_sample_us = 0;
+    g_imu_capture_active.store(true);
+    return actionResponse(req, ESP_OK, "IMU capture started; maximum duration is 60 seconds");
+}
+
+esp_err_t imuCaptureStopHandler(httpd_req_t *req) {
+    g_imu_capture_active.store(false);
+    return actionResponse(req, ESP_OK, "IMU capture stopped");
+}
+
+esp_err_t imuCaptureClearHandler(httpd_req_t *req) {
+    g_imu_capture_active.store(false);
+    g_imu_capture_count.store(0);
+    return actionResponse(req, ESP_OK, "IMU capture cleared");
+}
+
+esp_err_t imuCaptureStatusHandler(httpd_req_t *req) {
+    char body[160];
+    const size_t count = g_imu_capture_count.load();
+    const uint32_t duration_ms = count > 0 ? g_imu_capture[count - 1].elapsed_ms : 0;
+    std::snprintf(body, sizeof(body),
+                  "{\"active\":%s,\"samples\":%u,\"duration_ms\":%u,\"capacity\":%u}",
+                  g_imu_capture_active.load() ? "true" : "false", static_cast<unsigned>(count),
+                  static_cast<unsigned>(duration_ms), static_cast<unsigned>(kImuCaptureCapacity));
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, body);
+}
+
+esp_err_t imuCaptureDownloadHandler(httpd_req_t *req) {
+    if (g_imu_capture_active.load()) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Stop capture before downloading");
+    }
+    if (g_imu_capture_count.load() == 0) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No IMU samples have been captured");
+    }
+    httpd_resp_set_type(req, "text/csv; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=openwatts-imu-capture.csv");
+    ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, "elapsed_ms,accel_x_g,accel_y_g,accel_z_g,gyro_x_dps,gyro_y_dps,gyro_z_dps\n", HTTPD_RESP_USE_STRLEN), kTag, "send CSV header");
+    char row[192];
+    const size_t count = g_imu_capture_count.load();
+    for (size_t i = 0; i < count; ++i) {
+        const ImuCaptureSample &s = g_imu_capture[i];
+        const int length = std::snprintf(row, sizeof(row), "%u,%.5f,%.5f,%.5f,%.4f,%.4f,%.4f\n",
+                                         static_cast<unsigned>(s.elapsed_ms), static_cast<double>(s.accel[0]),
+                                         static_cast<double>(s.accel[1]), static_cast<double>(s.accel[2]),
+                                         static_cast<double>(s.gyro[0]), static_cast<double>(s.gyro[1]),
+                                         static_cast<double>(s.gyro[2]));
+        ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, row, length), kTag, "send CSV row");
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
+}
 esp_err_t bridgeConfirmHandler(httpd_req_t *req) {
     g_portal->setBridgeSignalConfirmed(formValue(requestBody(req), "confirmed") == "1");
     return actionResponse(req, ESP_OK, g_portal->bridgeSignalConfirmed() ? "Physical signal confirmed" : "Physical confirmation cleared");
@@ -488,6 +575,32 @@ esp_err_t operatingModeHandler(httpd_req_t *req) {
     return response;
 }
 
+esp_err_t rideLoggingHandler(httpd_req_t *req) {
+    if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
+    }
+    std::string body;
+    body.resize(static_cast<size_t>(req->content_len));
+    int received = 0;
+    while (received < req->content_len) {
+        const int got = httpd_req_recv(req, body.data() + received, req->content_len - received);
+        if (got <= 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+        received += got;
+    }
+    const std::string enabled = formValue(body, "enabled");
+    if (enabled != "0" && enabled != "1") return badSetting(req, "Ride logging enabled must be 0 or 1");
+    DeviceConfig candidate = *g_portal->mutableConfig();
+    candidate.ride_detection_enabled = enabled == "1";
+    const esp_err_t err = g_portal->storage()->save(candidate);
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
+    *g_portal->mutableConfig() = candidate;
+    g_portal->notifyConfigChanged();
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, enabled == "1"
+        ? "{\"ok\":true,\"ride_logging_enabled\":true,\"message\":\"Last ride recording enabled\"}"
+        : "{\"ok\":true,\"ride_logging_enabled\":false,\"message\":\"Last ride recording disabled\"}");
+}
+
 esp_err_t saveHandler(httpd_req_t *req) {
     if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
@@ -523,6 +636,8 @@ esp_err_t saveHandler(httpd_req_t *req) {
     const std::string minimum_cadence = formValue(body, "minimum_cadence_rpm");
     const std::string maximum_cadence = formValue(body, "maximum_cadence_rpm");
     const std::string advertising_power = formValue(body, "ble_advertising_power_dbm");
+    const std::string unit_system = formValue(body, "unit_system");
+    const std::string rider_mass = formValue(body, "rider_mass_kg");
 
     if (ssid.size() > 32) return badSetting(req, "Wi-Fi network name is too long");
     if (password.size() > 64) return badSetting(req, "Wi-Fi password is too long");
@@ -559,6 +674,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
     uint32_t parsed_minimum_cadence = candidate.minimum_cadence_rpm;
     uint32_t parsed_maximum_cadence = candidate.maximum_cadence_rpm;
     float parsed_revolution_threshold = candidate.imu_revolution_threshold_dps;
+    float parsed_rider_mass = candidate.rider_mass_kg;
     if (!parseUnsigned(minimum_ride, 30, 3600, parsed_minimum_ride))
         return badSetting(req, "Minimum ride duration must be between 30 and 3600 seconds");
     if (!parseUnsigned(cadence_timeout, 1, 60, parsed_cadence_timeout))
@@ -572,6 +688,10 @@ esp_err_t saveHandler(httpd_req_t *req) {
     if (!parseUnsigned(minimum_cadence, 1, 120, parsed_minimum_cadence) ||
         !parseUnsigned(maximum_cadence, parsed_minimum_cadence, 250, parsed_maximum_cadence))
         return badSetting(req, "Cadence range must be between 1 and 250 RPM");
+    if (unit_system != "imperial" && unit_system != "metric")
+        return badSetting(req, "Units must be Imperial or Metric");
+    if (!parseFloat(rider_mass, 35.0F, 250.0F, parsed_rider_mass))
+        return badSetting(req, "Rider mass must be between 35 and 250 kg");
     char *power_end = nullptr;
     const long parsed_advertising_power = std::strtol(advertising_power.c_str(), &power_end, 10);
     if (advertising_power.empty() || power_end == advertising_power.c_str() || *power_end != '\0' ||
@@ -617,6 +737,8 @@ esp_err_t saveHandler(httpd_req_t *req) {
     candidate.minimum_cadence_rpm = static_cast<uint8_t>(parsed_minimum_cadence);
     candidate.maximum_cadence_rpm = static_cast<uint8_t>(parsed_maximum_cadence);
     candidate.ble_advertising_power_dbm = static_cast<int8_t>(parsed_advertising_power);
+    candidate.imperial_units = unit_system == "imperial";
+    candidate.rider_mass_kg = parsed_rider_mass;
     candidate.force_setup_portal = false;
 
     esp_err_t err = g_portal->storage()->save(candidate);
@@ -782,6 +904,22 @@ SettingsStorage *SetupWifi::storage() {
 
 void SetupWifi::updateLiveStatus(const LiveStatus &status) {
     live_status_ = status;
+    if (g_imu_capture_active.load()) {
+        const int64_t now_us = esp_timer_get_time();
+        size_t count = g_imu_capture_count.load();
+        if (count < kImuCaptureCapacity &&
+            (g_imu_capture_last_sample_us == 0 || now_us - g_imu_capture_last_sample_us >= kImuCaptureIntervalUs)) {
+            ImuCaptureSample &sample = g_imu_capture[count];
+            sample.elapsed_ms = static_cast<uint32_t>((now_us - g_imu_capture_started_us) / 1000);
+            for (size_t axis = 0; axis < 3; ++axis) {
+                sample.accel[axis] = status.imu_accel_g[axis];
+                sample.gyro[axis] = status.imu_gyro_dps[axis];
+            }
+            g_imu_capture_last_sample_us = now_us;
+            g_imu_capture_count.store(count + 1);
+            if (count + 1 >= kImuCaptureCapacity) g_imu_capture_active.store(false);
+        }
+    }
 }
 
 LiveStatus SetupWifi::liveStatus() const {
@@ -807,7 +945,10 @@ esp_err_t SetupWifi::calibrationSave() {
 }
 esp_err_t SetupWifi::calibrationVerify() { return calibration_.verify(esp_timer_get_time(), config_ && OperatingPolicy::permitsMaintenanceTools(*config_), live_status_.hx711_ready); }
 esp_err_t SetupWifi::calibrationTare() {
-    if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;
+    // Manual Tare is an in-service adjustment, not Bench Calibration. If the
+    // WebUI is reachable, allow it in either operating mode; sensor and saved
+    // calibration validation remains inside CalibrationManager::manualTare().
+    if (!config_ || !storage_) return ESP_ERR_INVALID_STATE;
     DeviceConfig candidate = *config_;
     ESP_RETURN_ON_ERROR(calibration_.manualTare(candidate, live_status_.hx711_ready, live_status_.filtered_counts, live_status_.hx711_noise), kTag, "tare");
     ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save tare"); *config_ = candidate; return ESP_OK;
@@ -836,13 +977,14 @@ esp_err_t SetupWifi::startHttpServer() {
     g_portal = this;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 24;
+    cfg.max_uri_handlers = 30;
     ESP_RETURN_ON_ERROR(httpd_start(&g_httpd, &cfg), kTag, "httpd_start");
 
     httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = rootHandler, .user_ctx = nullptr};
     httpd_uri_t logo{.uri = "/assets/openwatts-logo.svg", .method = HTTP_GET, .handler = logoHandler, .user_ctx = nullptr};
     httpd_uri_t save{.uri = "/save", .method = HTTP_POST, .handler = saveHandler, .user_ctx = nullptr};
     httpd_uri_t operating_mode{.uri = "/api/operating-mode", .method = HTTP_POST, .handler = operatingModeHandler, .user_ctx = nullptr};
+    httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
     httpd_uri_t selftest{.uri = "/selftest", .method = HTTP_GET, .handler = selfTestHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
@@ -859,11 +1001,17 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t cal_discard{.uri = "/api/calibration/discard", .method = HTTP_POST, .handler = calibrationDiscardHandler, .user_ctx = nullptr};
     httpd_uri_t cal_reset{.uri = "/api/calibration/reset", .method = HTTP_POST, .handler = calibrationResetHandler, .user_ctx = nullptr};
     httpd_uri_t imu_reset{.uri = "/api/imu-reset", .method = HTTP_POST, .handler = imuResetHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_capture_start{.uri = "/api/imu-capture/start", .method = HTTP_POST, .handler = imuCaptureStartHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_capture_stop{.uri = "/api/imu-capture/stop", .method = HTTP_POST, .handler = imuCaptureStopHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_capture_clear{.uri = "/api/imu-capture/clear", .method = HTTP_POST, .handler = imuCaptureClearHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_capture_status{.uri = "/api/imu-capture/status", .method = HTTP_GET, .handler = imuCaptureStatusHandler, .user_ctx = nullptr};
+    httpd_uri_t imu_capture_download{.uri = "/api/imu-capture/download", .method = HTTP_GET, .handler = imuCaptureDownloadHandler, .user_ctx = nullptr};
     httpd_uri_t bridge_confirm{.uri = "/api/calibration/confirm-signal", .method = HTTP_POST, .handler = bridgeConfirmHandler, .user_ctx = nullptr};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &root), kTag, "root handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &logo), kTag, "logo handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &operating_mode), kTag, "operating mode handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &selftest), kTag, "selftest handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");
@@ -880,6 +1028,11 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_discard), kTag, "cal discard");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &cal_reset), kTag, "cal reset");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_reset), kTag, "imu reset");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_start), kTag, "IMU capture start");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_stop), kTag, "IMU capture stop");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_clear), kTag, "IMU capture clear");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_status), kTag, "IMU capture status");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_download), kTag, "IMU capture download");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bridge_confirm), kTag, "bridge confirm");
     return ESP_OK;
 }

@@ -17,11 +17,14 @@ void RideLog::begin(const LastRideSummary &stored) {
     resetCurrent();
 }
 
-bool RideLog::update(const PowerSample &sample, int64_t now_us, uint32_t qualification_seconds) {
+bool RideLog::update(const PowerSample &sample, int64_t now_us, uint32_t qualification_seconds,
+                     float rider_mass_kg) {
     const bool cadence_active = std::isfinite(sample.cadence_rpm) &&
                                 sample.cadence_rpm >= kCadenceActiveRpm;
     if (last_update_us_ == 0) last_update_us_ = now_us;
-    const double dt = std::clamp(static_cast<double>(now_us - last_update_us_) / 1000000.0, 0.0, 1.0);
+    const int64_t elapsed_us = now_us - last_update_us_;
+    const double dt = std::clamp(static_cast<double>(elapsed_us) / 1000000.0, 0.0, 1.0);
+    const bool distance_gap_valid = elapsed_us > 0 && elapsed_us <= 250000;
     last_update_us_ = now_us;
 
     if (!candidate_) {
@@ -40,6 +43,16 @@ bool RideLog::update(const PowerSample &sample, int64_t now_us, uint32_t qualifi
         cadence_rpm_seconds_ += static_cast<double>(sample.cadence_rpm) * dt;
         max_power_ = std::max(max_power_, safe_power);
         max_cadence_ = std::max(max_cadence_, sample.cadence_rpm);
+        if (distance_gap_valid && sample.valid && sample.power_watts >= 0 &&
+            std::isfinite(sample.cadence_rpm) && sample.cadence_rpm > 0.0F &&
+            std::isfinite(rider_mass_kg)) {
+            const float speed = RoadModel::speedMetersPerSecond(sample.power_watts, rider_mass_kg);
+            if (std::isfinite(speed) && speed >= 0.0F) {
+                estimated_distance_meters_ += static_cast<double>(speed) * dt;
+                maximum_estimated_speed_mps_ = std::max(maximum_estimated_speed_mps_, speed);
+                rider_mass_kg_ = rider_mass_kg;
+            }
+        }
         if (!qualified_ && moving_seconds_ >= qualification_seconds) qualified_ = true;
     } else if (qualified_) {
         if (stationary_started_us_ == 0) stationary_started_us_ = now_us;
@@ -68,6 +81,12 @@ void RideLog::finish(int64_t now_us, const char *reason) {
         ? static_cast<float>(cadence_rpm_seconds_ / moving_seconds_) : 0.0F;
     completed.maximum_cadence_rpm = max_cadence_;
     completed.work_kj = static_cast<float>(power_watt_seconds_ / 1000.0);
+    completed.estimated_distance_meters = static_cast<float>(estimated_distance_meters_);
+    completed.average_estimated_speed_mps = moving_seconds_ > 0.0
+        ? static_cast<float>(estimated_distance_meters_ / moving_seconds_) : 0.0F;
+    completed.maximum_estimated_speed_mps = maximum_estimated_speed_mps_;
+    completed.road_model_version = RoadModel::kVersion;
+    completed.rider_mass_kg = rider_mass_kg_;
     completed.valid = true;
     std::strncpy(completed.end_reason, reason, sizeof(completed.end_reason) - 1);
     last_ = completed;
@@ -79,6 +98,7 @@ void RideLog::resetCurrent() {
     candidate_ = false; qualified_ = false; cadence_started_us_ = 0; ride_started_us_ = 0;
     last_update_us_ = 0; stationary_started_us_ = 0; moving_seconds_ = 0.0;
     power_watt_seconds_ = 0.0; cadence_rpm_seconds_ = 0.0; max_power_ = 0.0F; max_cadence_ = 0.0F;
+    estimated_distance_meters_ = 0.0; maximum_estimated_speed_mps_ = 0.0F; rider_mass_kg_ = 0.0F;
 }
 void RideLog::clear() { last_ = LastRideSummary{}; resetCurrent(); pending_save_ = true; }
 const LastRideSummary &RideLog::lastRide() const { return last_; }

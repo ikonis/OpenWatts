@@ -9,7 +9,7 @@ namespace openwatts {
 
 struct DeviceConfig {
     static constexpr uint32_t kMagic = 0x4F575454;  // OWTT
-    static constexpr uint32_t kVersion = 11;
+    static constexpr uint32_t kVersion = 13;
 
     uint32_t magic = kMagic;
     uint32_t version = kVersion;
@@ -79,7 +79,7 @@ struct DeviceConfig {
     // Configuration plumbing for product controls whose algorithms are not
     // enabled yet. Append-only storage preserves all v6 field offsets.
     bool debug_logging_enabled = false;
-    bool auto_ride_zero_enabled = false;
+    bool auto_ride_zero_enabled = true;
     bool ride_detection_enabled = false;
     uint16_t minimum_ride_duration_seconds = 180;
     uint16_t cadence_timeout_seconds = 5;
@@ -111,6 +111,14 @@ struct DeviceConfig {
 
     OperatingMode operating_mode = OperatingMode::Normal;
     uint16_t ride_zero_stationary_timeout_seconds = 30;
+    // Learned unloaded strain signature. The center may drift thermally; these
+    // describe only the characteristic variation around that center.
+    float ride_zero_baseline_stddev_counts = 0.0F;
+    float ride_zero_baseline_range_counts = 0.0F;
+    // Road estimates remain SI internally. The unit preference affects only
+    // user-facing WebUI presentation.
+    bool imperial_units = true;
+    float rider_mass_kg = 82.0F;
 
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';

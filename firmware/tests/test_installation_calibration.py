@@ -58,8 +58,8 @@ class CalibrationArchitectureTests(unittest.TestCase):
         config = (SRC / "config.h").read_text()
         self.assertIn("rotation_aware_power_enabled = false", config)
         ui = (SRC / "web_ui.cpp").read_text()
-        self.assertIn("Rotation-aware power", ui)
-        self.assertIn("id=rotationAware type=checkbox disabled", ui)
+        self.assertNotIn("Rotation-aware power", ui)
+        self.assertNotIn("id=rotationAware", ui)
 
     def test_imu_tuning_is_maintenance_mode_data_not_a_session(self):
         web = (SRC / "setup_wifi.cpp").read_text()
@@ -72,9 +72,17 @@ class CalibrationArchitectureTests(unittest.TestCase):
         self.assertNotIn("/api/imu-tuning", web)
         self.assertNotIn("imu_tuning_enabled", (SRC / "config.h").read_text())
 
-    def test_nvs_schema_is_append_only_v11(self):
+    def test_imu_capture_is_relative_and_volatile(self):
+        server = (SRC / "setup_wifi.cpp").read_text()
+        docs = (ROOT.parent / "docs" / "IMU_TUNING.md").read_text()
+        self.assertIn("/api/imu-capture/start", server)
+        self.assertIn("std::array<ImuCaptureSample", server)
+        self.assertNotIn("saveImuCapture", server)
+        self.assertIn("start from any physical crank angle", docs)
+
+    def test_nvs_schema_is_append_only_v13(self):
         config = (SRC / "config.h").read_text()
-        self.assertIn("kVersion = 11", config)
+        self.assertIn("kVersion = 13", config)
         self.assertIn("reserved_legacy_imu_tuning_timeout_seconds", config)
         self.assertIn("legacy_wifi_keep_alive_without_usb", config)
         storage = (SRC / "settings_storage.cpp").read_text()
@@ -86,6 +94,19 @@ class CalibrationArchitectureTests(unittest.TestCase):
         implementation = (SRC / "ride_zero.cpp").read_text()
         self.assertIn("!config.strain_calibration_valid", implementation)
         self.assertIn("RideZeroResult::CalibrationRequired", implementation)
+
+    def test_automatic_ride_zero_uses_learned_strain_and_imu_stability(self):
+        config = (SRC / "config.h").read_text()
+        implementation = (SRC / "ride_zero.cpp").read_text()
+        main = (SRC / "main.cpp").read_text()
+        self.assertIn("auto_ride_zero_enabled = true", config)
+        self.assertIn("ride_zero_baseline_stddev_counts", config)
+        self.assertIn("ride_zero_baseline_range_counts", config)
+        self.assertIn("if (!imu_stationary)", implementation)
+        self.assertIn("last_.standard_deviation", implementation)
+        self.assertIn("last_.range", implementation)
+        self.assertIn("ble_zero_due_us = now_us + 3000000LL", main)
+        self.assertIn("RideZeroTrigger::BeforeSleep, sample, imu_stationary", main)
 
     def test_ride_history_requires_valid_power(self):
         implementation = (SRC / "ride_log.cpp").read_text()
@@ -101,6 +122,17 @@ class CalibrationArchitectureTests(unittest.TestCase):
         self.assertIn("last_ride_peak_power", mqtt)
         self.assertIn("last_ride_average_cadence", mqtt)
         self.assertIn("availability_template", mqtt)
+
+    def test_manual_tare_is_not_restricted_to_maintenance_mode(self):
+        server = (ROOT / "src" / "setup_wifi.cpp").read_text()
+        start = server.index("esp_err_t SetupWifi::calibrationTare()")
+        end = server.index("esp_err_t SetupWifi::calibrationReverse()")
+        handler = server[start:end]
+        self.assertNotIn("permitsMaintenanceTools", handler)
+        self.assertIn("calibration_.manualTare", handler)
+        web = (ROOT / "src" / "web_ui.cpp").read_text()
+        self.assertIn("id=statusTare", web)
+        self.assertIn("statusManualTare", web)
 
 
 if __name__ == "__main__":

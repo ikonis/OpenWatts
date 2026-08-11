@@ -37,7 +37,7 @@ Targets: `esp32c3` and `esp32c3_diagnostic`
 
 | Area | What exists | What is not complete |
 |---|---|---|
-| Cadence | Counts a revolution when gyro Z crosses a configurable threshold, rearms below 25%, derives RPM, applies a configurable timeout, and rejects configured implausible RPM. | Axis, orientation, filtering, direction, false-motion rejection, and installed-crank accuracy are not validated. This is not yet a production cadence algorithm. |
+| Cadence | Uses the physically validated RevA axis/sign: negative gyro Z is forward. It learns stationary bias, integrates forward angle, counts accumulated 360-degree rotations, rejects reverse motion, derives RPM from revolution timing, and applies configured range/timeout checks. | Requires first-ride confirmation under load; rotation-aware power remains disabled. |
 | Provisional IMU view | Maintenance computes dominant-axis velocity, integrated absolute angle, tentative cadence/revolutions, and a simple confidence value for the Diagnostics page. | It does not calibrate or tune the production algorithm, save results, or feed BLE/power/calibration. |
 | Timer battery path | A timer wake stays in the existing process, reads battery, decides whether to report, and otherwise returns to light sleep without executing the main sampling body. | Runtime enums are not used for dispatch. |
 | MQTT reliability | Publish success updates in-RAM report history; failure sets an in-RAM retry flag. | History does not survive reboot, there is no username/password/TLS setting, and the WebUI does not expose connection/result state. |
@@ -59,8 +59,8 @@ must not be described as working controls.
   uses `battery_report_voltage_delta`.
 - MQTT percentage thresholds: stored and sanitized but report decisions use
   voltage states, not these percentages.
-- Last-ride MQTT publication is not implemented; the latest ride is stored in
-  NVS and displayed locally.
+- Last-ride MQTT publication and Home Assistant discovery are implemented,
+  including SI-native estimated distance and average/maximum road speed.
 - Automatic-advertising remains fixed product behavior. Its historical NVS bit
   is reserved for binary-layout compatibility.
 - Rotation-aware power: flag and sensor-independent types exist, but no runtime
@@ -100,6 +100,7 @@ uses the value but the current Settings page does not expose it.
 | maximum power and power-filter alpha | Implemented and editable; the main loop consumes saved values immediately. |
 | Ride Diagnostics | Implemented and editable; serial logging only. |
 | Automatic Ride Zero, ride detection, minimum ride duration, cadence timeout | Implemented and editable; Ride Zero/history remain calibration-gated. |
+| unit system and rider mass | Implemented and editable. Calculations and MQTT remain SI; the WebUI converts to the selected presentation units. |
 | rotation-aware power | Stored but unused. |
 | debug logging | Implemented and editable. |
 | BLE advertising power | Implemented and editable; applied after restart. |

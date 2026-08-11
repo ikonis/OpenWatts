@@ -14,6 +14,21 @@ constexpr char kNamespace[] = "openwatts";
 constexpr char kConfigKey[] = "config";
 constexpr char kLastRideKey[] = "last_ride";
 
+struct LastRideSummaryV1 {
+    uint32_t schema_version;
+    uint32_t sequence;
+    uint32_t moving_seconds;
+    uint32_t elapsed_seconds;
+    uint32_t crank_revolutions;
+    float average_power_watts;
+    int16_t maximum_power_watts;
+    float average_cadence_rpm;
+    float maximum_cadence_rpm;
+    float work_kj;
+    bool valid;
+    char end_reason[24];
+};
+
 DeviceConfig sanitized(DeviceConfig config) {
     if (config.magic != DeviceConfig::kMagic || config.version > DeviceConfig::kVersion) {
         return DeviceConfig{};
@@ -22,6 +37,15 @@ DeviceConfig sanitized(DeviceConfig config) {
     if (stored_version < 10) {
         config.operating_mode = config.legacy_wifi_keep_alive_without_usb
             ? OperatingMode::Maintenance : OperatingMode::Normal;
+    }
+    if (stored_version < 12) {
+        config.auto_ride_zero_enabled = true;
+        config.ride_zero_baseline_stddev_counts = 0.0F;
+        config.ride_zero_baseline_range_counts = 0.0F;
+    }
+    if (stored_version < 13) {
+        config.imperial_units = true;
+        config.rider_mass_kg = 82.0F;
     }
     if (config.operating_mode != OperatingMode::Normal && config.operating_mode != OperatingMode::Maintenance) {
         config.operating_mode = OperatingMode::Normal;
@@ -77,6 +101,12 @@ DeviceConfig sanitized(DeviceConfig config) {
     config.imu_stationary_timeout_ms = std::clamp<uint16_t>(config.imu_stationary_timeout_ms, 250, 30000);
     config.ride_zero_stationary_timeout_seconds =
         std::clamp<uint16_t>(config.ride_zero_stationary_timeout_seconds, 10, 600);
+    if (!std::isfinite(config.ride_zero_baseline_stddev_counts) || config.ride_zero_baseline_stddev_counts < 0.0F)
+        config.ride_zero_baseline_stddev_counts = 0.0F;
+    if (!std::isfinite(config.ride_zero_baseline_range_counts) || config.ride_zero_baseline_range_counts < 0.0F)
+        config.ride_zero_baseline_range_counts = 0.0F;
+    if (!std::isfinite(config.rider_mass_kg) || config.rider_mass_kg < 35.0F || config.rider_mass_kg > 250.0F)
+        config.rider_mass_kg = 82.0F;
     if (!std::isfinite(config.counts_per_nm) || config.counts_per_nm <= 0.0F) {
         config.strain_calibration_valid = false;
         config.counts_per_nm = 10000.0F;
@@ -162,12 +192,39 @@ LastRideSummary SettingsStorage::loadLastRide() {
     if (!initialized_) return summary;
     nvs_handle_t handle = 0;
     if (nvs_open(kNamespace, NVS_READONLY, &handle) != ESP_OK) return summary;
-    size_t size = sizeof(summary);
-    const esp_err_t err = nvs_get_blob(handle, kLastRideKey, &summary, &size);
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(handle, kLastRideKey, nullptr, &size);
+    if (err != ESP_OK) { nvs_close(handle); return summary; }
+    if (size == sizeof(summary)) {
+        err = nvs_get_blob(handle, kLastRideKey, &summary, &size);
+        nvs_close(handle);
+        return err == ESP_OK && summary.schema_version == LastRideSummary::kSchemaVersion
+            ? summary : LastRideSummary{};
+    }
+    if (size == sizeof(LastRideSummaryV1)) {
+        LastRideSummaryV1 legacy{};
+        err = nvs_get_blob(handle, kLastRideKey, &legacy, &size);
+        nvs_close(handle);
+        if (err != ESP_OK || legacy.schema_version != 1 || !legacy.valid) return LastRideSummary{};
+        summary.sequence = legacy.sequence;
+        summary.moving_seconds = legacy.moving_seconds;
+        summary.elapsed_seconds = legacy.elapsed_seconds;
+        summary.crank_revolutions = legacy.crank_revolutions;
+        summary.average_power_watts = legacy.average_power_watts;
+        summary.maximum_power_watts = legacy.maximum_power_watts;
+        summary.average_cadence_rpm = legacy.average_cadence_rpm;
+        summary.maximum_cadence_rpm = legacy.maximum_cadence_rpm;
+        summary.work_kj = legacy.work_kj;
+        summary.valid = true;
+        std::strncpy(summary.end_reason, legacy.end_reason, sizeof(summary.end_reason) - 1);
+        // Model version zero explicitly means this pre-model ride has no
+        // reproducible road estimate. Never invent one after settings change.
+        summary.road_model_version = 0;
+        return summary;
+    }
     nvs_close(handle);
-    if (err != ESP_OK || size != sizeof(summary) ||
-        summary.schema_version != LastRideSummary::kSchemaVersion) return LastRideSummary{};
-    return summary;
+    ESP_LOGW(kTag, "last ride blob has unsupported size %u", static_cast<unsigned>(size));
+    return LastRideSummary{};
 }
 
 esp_err_t SettingsStorage::saveLastRide(const LastRideSummary &summary) {

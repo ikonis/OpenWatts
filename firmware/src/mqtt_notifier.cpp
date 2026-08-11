@@ -33,6 +33,9 @@ void publishDiscovery(esp_mqtt_client_handle_t client, const char *state_topic) 
         {"last_ride_peak_cadence", "Last Ride Peak Cadence", "last_ride_peak_cadence", "rpm", "", true, true},
         {"last_ride_revolutions", "Last Ride Revolutions", "last_ride_revolutions", "rev", "", true, true},
         {"last_ride_work", "Last Ride Work", "last_ride_work_kj", "kJ", "energy", true, true},
+        {"last_ride_distance", "Last Ride Estimated Distance", "last_ride_estimated_distance_m", "m", "distance", true, true},
+        {"last_ride_average_speed", "Last Ride Estimated Average Speed", "last_ride_average_speed_mps", "m/s", "speed", true, true},
+        {"last_ride_peak_speed", "Last Ride Estimated Maximum Speed", "last_ride_peak_speed_mps", "m/s", "speed", true, true},
         {"last_ride_end_reason", "Last Ride End Reason", "last_ride_end_reason", "", "", false, true},
     };
     char topic[128]{};

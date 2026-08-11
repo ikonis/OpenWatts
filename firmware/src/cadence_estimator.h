@@ -9,8 +9,11 @@ namespace openwatts {
 
 struct CadenceState {
     float rpm = 0.0F;
+    float forward_delta_radians = 0.0F;
     uint32_t revolutions = 0;
     int64_t last_revolution_us = 0;
+    int64_t revolution_duration_us = 0;
+    bool revolution_completed = false;
     bool moving = false;
 };
 
@@ -24,7 +27,12 @@ public:
 private:
     DeviceConfig config_{};
     CadenceState latest_{};
-    bool armed_ = true;
+    float gyro_z_bias_dps_ = 0.0F;
+    float forward_angle_degrees_ = 0.0F;
+    float reverse_angle_degrees_ = 0.0F;
+    int64_t last_sample_us_ = 0;
+    int64_t motion_started_us_ = 0;
+    int64_t stationary_since_us_ = 0;
     int64_t previous_revolution_us_ = 0;
 };
 

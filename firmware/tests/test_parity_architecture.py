@@ -117,7 +117,7 @@ class ParityArchitectureTests(unittest.TestCase):
         config = (SRC / "config.h").read_text()
         storage = (SRC / "settings_storage.cpp").read_text()
         web = (SRC / "setup_wifi.cpp").read_text()
-        self.assertIn("static constexpr uint32_t kVersion = 11", config)
+        self.assertIn("static constexpr uint32_t kVersion = 13", config)
         self.assertIn("OperatingMode operating_mode", config)
         for field in (
             "debug_logging_enabled",
@@ -149,7 +149,10 @@ class ParityArchitectureTests(unittest.TestCase):
             "name=debug_logging",
         ):
             self.assertIn(active, ui)
-        self.assertIn("id=rotationAware type=checkbox disabled", ui)
+        self.assertNotIn("id=rotationAware", ui)
+        self.assertIn("id=rideZeroUnit", ui)
+        self.assertIn("id=minRideUnit", ui)
+        self.assertIn("id=cadenceTimeoutUnit", ui)
 
     def test_obsolete_bench_sleep_route_is_absent(self):
         server = (SRC / "setup_wifi.cpp").read_text()

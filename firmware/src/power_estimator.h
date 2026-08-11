@@ -53,6 +53,8 @@ private:
     uint8_t median_index_ = 0;
     float filtered_power_ = 0.0F;
     bool has_filtered_power_ = false;
+    float revolution_work_joules_ = 0.0F;
+    float revolution_angle_radians_ = 0.0F;
     PowerRejectionReason last_rejection_ = PowerRejectionReason::None;
     uint32_t rejected_samples_ = 0;
 };
