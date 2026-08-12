@@ -40,3 +40,20 @@ only and cannot feed production power. Last Ride is stored locally; it is not
 added to the battery MQTT payload.
 
 There is no general Reboot or Factory Reset action in the current WebUI.
+# Live Ride dashboard
+
+`/ride` is a phone-first, read-only dashboard for active rides. OpenWatts supplies
+its authoritative power, cadence, modeled speed, candidate/qualified ride time
+and distance, and battery state through the existing `/status` snapshot.
+
+The browser independently polls
+`http://smartspin2k.local/runtimeConfigJSON` approximately once per second for
+measured/target power, cadence, heart rate, resistance, target resistance,
+logical shifter position, and FTMS control mode. OpenWatts does not proxy or
+persist this SmartSpin2K data. A missing or malformed SS2K value displays as
+zero or unavailable and cannot affect BLE CPS or ride recording.
+
+In Normal Mode, Wi-Fi starts once the existing ride logger qualifies a ride and
+remains available through the existing post-ride reporting and sleep boundary.
+Network startup is attempted once and failure never creates a sampling-loop
+retry. Maintenance Mode behavior is unchanged.

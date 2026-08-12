@@ -76,7 +76,11 @@ struct LiveStatus {
     const char *provisional_reason = "tuning_disabled";
     bool motion_detected = false;
     LastRideSummary last_ride{};
+    bool ride_candidate = false;
     bool ride_active = false;
+    uint32_t current_ride_moving_seconds = 0;
+    float current_ride_distance_meters = 0.0F;
+    float current_ride_speed_mps = 0.0F;
 };
 
 class SetupWifi {

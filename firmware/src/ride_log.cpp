@@ -105,6 +105,13 @@ void RideLog::clear() { last_ = LastRideSummary{}; resetCurrent(); pending_save_
 const LastRideSummary &RideLog::lastRide() const { return last_; }
 bool RideLog::candidate() const { return candidate_; }
 bool RideLog::active() const { return qualified_; }
+uint32_t RideLog::currentMovingSeconds() const {
+    return static_cast<uint32_t>(std::max(0.0, std::floor(moving_seconds_)));
+}
+float RideLog::currentDistanceMeters() const {
+    return std::isfinite(estimated_distance_meters_) && estimated_distance_meters_ > 0.0
+        ? static_cast<float>(estimated_distance_meters_) : 0.0F;
+}
 bool RideLog::completedPendingSave() const { return pending_save_; }
 void RideLog::markSaved() { pending_save_ = false; }
 void RideLog::markMqttPublished() { last_.mqtt_publish_pending = false; }

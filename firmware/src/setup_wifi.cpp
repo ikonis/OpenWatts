@@ -314,6 +314,10 @@ esp_err_t rootHandler(httpd_req_t *req) {
     return sendPage(req, webui::kStatusPage);
 }
 
+esp_err_t ridePageHandler(httpd_req_t *req) {
+    return sendPage(req, webui::kRidePage);
+}
+
 esp_err_t statusHandler(httpd_req_t *req) {
     if (g_portal == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
     const LiveStatus s = g_portal->liveStatus();
@@ -346,7 +350,9 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   "\"provisional_angular_velocity_dps\":%.2f,\"provisional_cadence_rpm\":%.2f,"
                   "\"provisional_revolutions\":%u,\"provisional_confidence\":%.3f,"
                   "\"provisional_reason\":\"%s\","
-                  "\"ride_active\":%s,\"last_ride\":{\"valid\":%s,\"sequence\":%u,"
+                  "\"ride_candidate\":%s,\"ride_active\":%s,"
+                  "\"current_ride_moving_seconds\":%u,\"current_ride_distance_meters\":%.2f,"
+                  "\"current_ride_speed_mps\":%.3f,\"last_ride\":{\"valid\":%s,\"sequence\":%u,"
                   "\"moving_seconds\":%u,\"elapsed_seconds\":%u,\"revolutions\":%u,"
                   "\"average_power\":%.1f,\"maximum_power\":%d,\"average_cadence\":%.1f,"
                   "\"maximum_cadence\":%.1f,\"work_kj\":%.2f,\"end_reason\":\"%s\","
@@ -414,7 +420,10 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   static_cast<double>(s.provisional_angular_velocity_dps),
                   static_cast<double>(s.provisional_cadence_rpm), static_cast<unsigned>(s.provisional_revolutions),
                   static_cast<double>(s.provisional_confidence), s.provisional_reason,
-                  s.ride_active ? "true" : "false", s.last_ride.valid ? "true" : "false",
+                  s.ride_candidate ? "true" : "false", s.ride_active ? "true" : "false",
+                  static_cast<unsigned>(s.current_ride_moving_seconds),
+                  static_cast<double>(s.current_ride_distance_meters),
+                  static_cast<double>(s.current_ride_speed_mps), s.last_ride.valid ? "true" : "false",
                   static_cast<unsigned>(s.last_ride.sequence), static_cast<unsigned>(s.last_ride.moving_seconds),
                   static_cast<unsigned>(s.last_ride.elapsed_seconds), static_cast<unsigned>(s.last_ride.crank_revolutions),
                   static_cast<double>(s.last_ride.average_power_watts), static_cast<int>(s.last_ride.maximum_power_watts),
@@ -1022,6 +1031,7 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
     httpd_uri_t selftest{.uri = "/selftest", .method = HTTP_GET, .handler = selfTestHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
+    httpd_uri_t ride_page{.uri = "/ride", .method = HTTP_GET, .handler = ridePageHandler, .user_ctx = nullptr};
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
     httpd_uri_t diagnostics{.uri = "/diagnostics", .method = HTTP_GET, .handler = diagnosticsHandler, .user_ctx = nullptr};
     httpd_uri_t calibration{.uri = "/calibration", .method = HTTP_GET, .handler = calibrationHandler, .user_ctx = nullptr};
@@ -1049,6 +1059,7 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &selftest), kTag, "selftest handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_page), kTag, "ride page handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &diagnostics), kTag, "diagnostics handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &calibration), kTag, "calibration handler");

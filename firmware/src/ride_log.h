@@ -38,6 +38,8 @@ public:
     const LastRideSummary &lastRide() const;
     bool candidate() const;
     bool active() const;
+    uint32_t currentMovingSeconds() const;
+    float currentDistanceMeters() const;
     bool completedPendingSave() const;
     void markSaved();
     void markMqttPublished();

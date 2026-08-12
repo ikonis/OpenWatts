@@ -323,6 +323,11 @@ extern "C" void app_main() {
     int64_t stationary_since_us = 0;
     bool stationary_zero_attempted = false;
     bool sleep_report_attempted = false;
+    // Normal Mode may bring up the optional dashboard once the existing ride
+    // logger qualifies a ride.  This RAM-only latch survives cadence pauses
+    // and remains set until the ordinary post-ride reporting/sleep boundary.
+    bool ride_wifi_latched = false;
+    bool ride_wifi_start_attempted = false;
     while (true) {
         if (g_timer_decision_pending) {
             openwatts::ledStatus().setSleeping(true);
@@ -421,7 +426,8 @@ extern "C" void app_main() {
                 if (wifi_err != ESP_OK) {
                     ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
                 }
-            } else if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
+            } else if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) &&
+                       !ride_wifi_latched) {
                 usb_removed_zero_due_us = now_us + 2000000LL;
                 g_setup_wifi.stop();
             } else {
@@ -432,6 +438,7 @@ extern "C" void app_main() {
         // A Settings save can change Operating Mode without a USB edge.
         // Honor Normal Mode promptly after the response has been delivered.
         if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) &&
+            !ride_wifi_latched &&
             g_setup_wifi.active() && !g_mqtt.running()) {
             g_setup_wifi.stop();
         }
@@ -522,9 +529,31 @@ extern "C" void app_main() {
                 else ESP_LOGW(kTag, "last ride save failed: %s", esp_err_to_name(ride_err));
             }
         }
+        if (g_ride_log.active() && !ride_wifi_latched) {
+            ride_wifi_latched = true;
+            if (!g_setup_wifi.active() && !ride_wifi_start_attempted && g_config.hasWifiCredentials()) {
+                ride_wifi_start_attempted = true;
+                const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, current_usb_present, false, true);
+                if (wifi_err != ESP_OK) {
+                    // The dashboard is optional.  Never retry in the sampling
+                    // loop or let a network failure disturb this ride.
+                    ESP_LOGW(kTag, "ride dashboard Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
+                } else {
+                    ESP_LOGI(kTag, "qualified ride started; ride dashboard available");
+                }
+            }
+        }
         if (now_us - last_status_battery_us >= 1000LL * 1000LL) {
             last_status_battery_us = now_us;
             status_battery = readBattery();
+        }
+        float current_ride_speed_mps = 0.0F;
+        if (sample.valid && sample.cadence_rpm > 0.0F) {
+            const float modeled_speed = openwatts::RoadModel::speedMetersPerSecond(
+                sample.power_watts, g_config.rider_mass_kg);
+            if (std::isfinite(modeled_speed) && modeled_speed > 0.0F) {
+                current_ride_speed_mps = modeled_speed;
+            }
         }
         g_setup_wifi.updateLiveStatus({
             .uptime_seconds = static_cast<uint32_t>(now_us / 1000000LL), .battery_voltage = status_battery.voltage,
@@ -581,7 +610,11 @@ extern "C" void app_main() {
             .provisional_revolutions = g_provisional_revolutions,
             .provisional_confidence = provisional_confidence,
             .provisional_reason = provisional_reason, .motion_detected = motion_detected,
-            .last_ride = g_ride_log.lastRide(), .ride_active = g_ride_log.active(),
+            .last_ride = g_ride_log.lastRide(), .ride_candidate = g_ride_log.candidate(),
+            .ride_active = g_ride_log.active(),
+            .current_ride_moving_seconds = g_ride_log.currentMovingSeconds(),
+            .current_ride_distance_meters = g_ride_log.currentDistanceMeters(),
+            .current_ride_speed_mps = current_ride_speed_mps,
         });
 
         // Reporting is independent from battery sampling.  It can wake the
@@ -589,7 +622,7 @@ extern "C" void app_main() {
         // dashboard change.
         if (g_mqtt.running() && g_mqtt.complete()) {
             finishBatteryReport(status_battery, g_battery_policy.state(), now_us);
-            if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) {
+            if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) && !ride_wifi_latched) {
                 g_setup_wifi.stop();
             }
         }
@@ -675,6 +708,8 @@ extern "C" void app_main() {
                 ESP_LOGW(kTag, "pre-sleep Last Ride report could not start; retaining pending ride");
                 g_report_history.retry_pending = true;
             }
+            ride_wifi_latched = false;
+            ride_wifi_start_attempted = false;
             if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) g_setup_wifi.stop();
             attemptRideZero(openwatts::RideZeroTrigger::BeforeSleep, sample, imu_stationary, now_us);
             openwatts::PowerManager::WakeResult wake_result{};
