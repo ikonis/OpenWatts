@@ -275,7 +275,7 @@ extern "C" void app_main() {
     err = g_imu.begin();
     const bool imu_start_failed = err != ESP_OK;
     if (err != ESP_OK) {
-        ESP_LOGW(kTag, "IMU init failed; continuing for HX711/BLE bring-up: %s", esp_err_to_name(err));
+        ESP_LOGW(kTag, "IMU init failed; cadence unavailable: %s", esp_err_to_name(err));
     } else {
         ESP_LOGI(kTag, "LSM6DS3 WHO_AM_I=0x%02x", g_imu.whoAmI());
     }
@@ -643,9 +643,8 @@ extern "C" void app_main() {
         // Maintenance deliberately keeps the runtime awake; entering light
         // sleep would immediately tear down the web server and radio.
         // A qualified ride owns the runtime until its stationary completion
-        // window closes. After persistence, keep the runtime alive until the
-        // queued ride MQTT report has finished; otherwise Normal Mode's short
-        // idle timeout could sleep before the summary is saved or published.
+        // window closes. Once persisted, the pending summary is given one
+        // bounded publish attempt when this ordinary sleep path becomes due.
         const bool ride_finalize_pending = g_ride_log.active();
         const bool sleep_due = openwatts::OperatingPolicy::permitsInactivitySleep(g_config) &&
             !current_usb_present && !g_ble.connected() && !ride_finalize_pending &&

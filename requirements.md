@@ -25,5 +25,5 @@ changes.
 - USB present GPIO8, charge status GPIO5, battery ADC GPIO4.
 - GPIO10 is not RTC-capable on ESP32-C3; IMU wake therefore uses light sleep.
 
-Zigbee, ESP32-C6, Hall cadence and PCB redesign are not OpenWatts RevA
-requirements.
+The firmware targets only the assembled OpenWatts RevA hardware described
+above. PCB redesign is outside this repository's firmware scope.

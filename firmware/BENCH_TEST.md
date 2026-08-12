@@ -5,9 +5,9 @@ IMU identity/vectors and honest strain-signal classification. HX711 conversions
 with an open input are not proof of a complete bridge.
 
 After connection, verify raw response, return-to-zero, noise and lack of
-saturation before Bench Calibration. Keep rotation-aware power and Automatic
-Ride Zero disabled.
+saturation before Bench Calibration. Automatic Ride Zero remains calibration-
+gated and may be enabled after the unloaded bridge is stable.
 
 Current Ride Diagnostics writes a compact serial line; it does not create a
-high-rate MQTT trace. The Diagnostics-page IMU values are provisional and do
-not tune the active cadence stub.
+high-rate MQTT trace. The Diagnostics-page provisional tracker is isolated from
+the active cadence and power pipeline.

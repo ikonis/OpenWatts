@@ -34,9 +34,9 @@ struct DeviceConfig {
     bool self_test_done = false;
     float hx711_smoothing = 0.20F;
     int32_t zero_offset_counts = 0;
-    float counts_per_nm = 10000.0F;  // TODO: calibrate with known torque fixture.
+    float counts_per_nm = 10000.0F;  // Replaced by Bench Calibration on the assembled crank.
     int32_t torque_sign = 1;
-    float imu_revolution_threshold_dps = 120.0F;  // TODO: replace with validated crank cadence algorithm.
+    float imu_revolution_threshold_dps = 120.0F;
     uint8_t imu_wake_threshold = 4;
     uint8_t imu_wake_duration = 1;
     char ble_device_name[19] = "OpenWatts";
@@ -72,12 +72,11 @@ struct DeviceConfig {
     uint16_t maximum_valid_power_watts = 2000;
     float power_filter_alpha = 0.35F;
     bool ride_diagnostics_enabled = false;
-    // The threshold-crossing cadence provider is bring-up-only. Rotation-aware
-    // power stays disabled until physical IMU axis/angle validation succeeds.
+    // Reserved product setting. Production power currently uses completed
+    // IMU revolutions without crank-angle weighting.
     bool rotation_aware_power_enabled = false;
 
-    // Configuration plumbing for product controls whose algorithms are not
-    // enabled yet. Append-only storage preserves all v6 field offsets.
+    // Append-only storage preserves all deployed field offsets.
     bool debug_logging_enabled = false;
     bool auto_ride_zero_enabled = true;
     bool ride_detection_enabled = false;
@@ -93,8 +92,7 @@ struct DeviceConfig {
     float calibration_mass_kg = 0.0F;
     float calibration_lever_arm_mm = 0.0F;
 
-    // Installation-time IMU tuning scaffolding. Production rotation-aware
-    // power remains disabled until crank-mounted validation is complete.
+    // Installed-crank IMU configuration and compatibility fields.
     uint16_t imu_accel_odr_hz = 104;
     uint8_t imu_accel_range_g = 2;
     uint16_t imu_gyro_odr_hz = 104;

@@ -1,7 +1,6 @@
 # IMU Tuning Plan
 
-Rotation-aware power remains unavailable until first-ride validation. The
-installed RevA cadence path uses bias-corrected negative gyro-Z integration,
+The installed RevA cadence path uses bias-corrected negative gyro-Z integration,
 counts each accumulated 360-degree forward rotation, and rejects positive-Z
 reverse motion. Provisional Diagnostics-page tuning data remains separate
 and never feeds BLE, power estimation, calibration, or Ride Zero.
@@ -16,8 +15,8 @@ It exposes sensor vectors, interrupt/motion state, provisional dominant-axis
 angle and velocity, tentative cadence/revolution output, confidence and a
 reason. The tracker can be reset, but it does not save tuning values or modify
 the cadence provider. Physical testing must establish
-axis, direction, stationary thresholds, cadence limits, wrap detection,
-staleness and confidence before normal controls are enabled.
+axis, direction, stationary thresholds, cadence limits, wrap detection and
+staleness when troubleshooting field behavior.
 
 Crank position is never a user calibration requirement. Capture and future
 production cadence detection must start from any physical crank angle. The

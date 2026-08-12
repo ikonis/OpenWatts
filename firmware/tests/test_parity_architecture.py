@@ -42,10 +42,11 @@ class RotationTraceModel:
 
 
 class ParityArchitectureTests(unittest.TestCase):
-    def test_runtime_modes_are_exclusive_and_named(self):
-        text = (SRC / "runtime.h").read_text()
-        for name in ("Normal", "UsbMaintenance", "TimerDecision", "Report"):
-            self.assertIn(name, text)
+    def test_obsolete_runtime_prototype_is_absent(self):
+        self.assertFalse((SRC / "runtime.h").exists())
+        self.assertFalse((SRC / "runtime.cpp").exists())
+        cmake = (SRC / "CMakeLists.txt").read_text()
+        self.assertNotIn("runtime.cpp", cmake)
 
     def test_signed_cps_encoding_has_explicit_safe_boundary(self):
         text = (SRC / "ble_cycling_power.cpp").read_text()
@@ -94,9 +95,17 @@ class ParityArchitectureTests(unittest.TestCase):
         self.assertFalse(tracker.update(350, forward=False))
 
     def test_missing_and_stale_imu_are_explicit(self):
-        text = (SRC / "rotation.h").read_text()
-        for state in ("Stale", "SensorMissing", "SensorFailed", "InsufficientPostWakeData"):
-            self.assertIn(state, text)
+        header = (SRC / "cadence_estimator.h").read_text()
+        implementation = (SRC / "cadence_estimator.cpp").read_text()
+        self.assertIn("ImuInvalidTimeout", header)
+        self.assertIn("imu_invalid_reads", header)
+        self.assertIn("cadence_timeout_seconds", implementation)
+
+    def test_obsolete_rotation_prototype_is_absent(self):
+        self.assertFalse((SRC / "rotation.h").exists())
+        self.assertFalse((SRC / "rotation.cpp").exists())
+        cmake = (SRC / "CMakeLists.txt").read_text()
+        self.assertNotIn("rotation.cpp", cmake)
 
     def test_rotation_power_is_disabled_by_default(self):
         text = (SRC / "config.h").read_text()

@@ -8,7 +8,7 @@
 6. Mount the enclosure and secure every bridge/USB/battery connection.
 7. Confirm Normal Mode inactivity sleep, IMU wake, and USB wake.
 8. Return to Maintenance, remove USB, and capture installed-crank IMU behavior.
-9. Compare the active cadence stub against counted revolutions; do not assume it
+9. Compare active IMU cadence against counted revolutions; do not assume it
    is accurate because values appear.
 10. Pair BLE and perform a short controlled ride only after cadence evidence is
     acceptable.

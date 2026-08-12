@@ -861,7 +861,7 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
 
     ESP_RETURN_ON_ERROR(ensureWifiInitialized(), kTag, "wifi init");
 
-    // A saved network is the normal USB bring-up path.  Keep the radio in
+    // A saved network is the normal USB maintenance path. Keep the radio in
     // plain station mode there: APSTA is only recovery/setup and adds needless
     // coexistence/channel changes while connecting to the router.
     const bool start_setup_ap = !config.hasWifiCredentials() || setup_requested || config.force_setup_portal;

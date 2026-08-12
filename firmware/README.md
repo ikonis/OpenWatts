@@ -1,120 +1,74 @@
 # OpenWatts firmware
 
-OpenWatts is an ESP32-C3 cycling power-meter firmware using an HX711 strain
-channel and LSM6DS3 IMU. The current `1.0.10` build is the integrated
-baseline: maintenance, calibration, BLE CPS, battery, MQTT, OTA, and sleep
-foundations exist, but cadence and installed strain behavior are not yet
-product-validated.
-
-See [`../docs/IMPLEMENTATION_STATUS.md`](../docs/IMPLEMENTATION_STATUS.md) for
-the authoritative implemented/partial/missing/superseded matrix.
+OpenWatts is an ESP32-C3 cycling power meter using an HX711 strain channel and
+an LSM6DS3 IMU. The firmware provides BLE Cycling Power, persistent calibration
+and Ride Zero, ride history, battery-conscious sleep, USB/Maintenance Wi-Fi,
+OTA, MQTT, and a responsive local WebUI.
 
 ## Hardware boundary
 
-`src/board.h` is authoritative for the shipped PCB:
+`src/board.h` is authoritative for the assembled RevA PCB. GPIO10 is not an
+ESP32-C3 deep-sleep wake GPIO, so motion wake uses IMU-armed light sleep. The
+firmware does not implement deep sleep.
 
-- HX711 DOUT/SCK: GPIO0/1
-- awake LED: GPIO3
-- battery ADC: GPIO4
-- charge status: GPIO5
-- I2C SDA/SCL: GPIO6/7
-- USB present: GPIO8
-- boot: GPIO9
-- IMU INT1: GPIO10
-- native USB: GPIO18/19
+## Operating modes
 
-GPIO10 is not an ESP32-C3 deep-sleep wake GPIO. OpenWatts therefore uses IMU-
-armed light sleep for motion wake. Deep sleep is not implemented.
+- **Normal** is the riding mode. BLE and sensors remain responsive; Wi-Fi is
+  limited to USB and bounded reports; inactivity permits light sleep.
+- **Maintenance** keeps Wi-Fi/WebUI and service tools available on battery and
+  intentionally prevents inactivity sleep.
 
-## Operating Mode
+The mode applies immediately and persists across reboot.
 
-The persistent user-facing mode is exactly **Normal** or **Maintenance**.
+## Measurement and ride behavior
 
-- Normal limits Wi-Fi to USB or a required battery report and allows inactivity
-  light sleep.
-- Maintenance keeps Wi-Fi/WebUI active on battery, enables calibration/raw/IMU
-  tools, publishes MQTT on a fixed maintenance cadence, and prevents inactivity
-  sleep.
+- Cadence is derived from completed forward IMU rotations and published through
+  BLE CPS crank-revolution data.
+- Torque comes from the calibrated HX711 bridge. Bench Calibration owns the
+  permanent scale; Manual Tare and Automatic Ride Zero only change runtime zero.
+- Power uses the authoritative cadence/torque pipeline, invalid-sample rejection,
+  completed-revolution integration, median filtering, and a lightweight EMA.
+- A qualified completed ride is retained in NVS with power, cadence, work,
+  revolutions, and reproducible road-model context.
+- A completed ride is marked MQTT-pending. When ordinary Normal Mode sleep is
+  due, firmware makes one bounded QoS 1 report attempt, then sleeps regardless
+  of network success. Failed reports remain pending for a later opportunity.
 
-The segmented control applies and saves immediately. Schema 9 and older migrate
-the former keep-Wi-Fi setting to the corresponding schema 10 mode.
+Road estimates use SI internally. Model version 1 applies 97% drivetrain
+efficiency and solves flat-road rolling plus aerodynamic resistance. The WebUI
+defaults to Imperial presentation; MQTT remains SI-native for Home Assistant.
 
-## What is usable now
+## Wi-Fi, WebUI, and OTA
 
-- Wi-Fi station mode and recovery/setup AP at `192.168.4.1`
-- responsive WebUI with live status, settings, calibration, OTA, diagnostics
-- OTA on USB, or in Maintenance Mode above 3.75 V, with image/partition validation and automatic reboot
-- NVS persistence and append-only migration
-- battery voltage/display estimate, voltage states, and MQTT reporting
-- Home Assistant MQTT discovery for five battery/device sensors
-- IMU motion wake, USB wake, and timer wake from light sleep
-- HX711 reading/filtering/readiness/failure handling
-- guided Bench Calibration, verification, Manual Tare, direction reversal/reset
-- signed-safe BLE Cycling Power Service and crank-revolution fields
-- invalid-sample rejection plus median-five/EMA power smoothing
-- calibration-gated automatic Ride Zero with stable multi-sample acceptance
-- calibration-gated ride detection and persistent last-ride summary
-- flat-road speed and distance estimates derived from the exact BLE power
-  value, with Imperial WebUI presentation by default and SI-native MQTT values
-- configurable cadence timeout/range, motion wake, BLE radio power, and logging
+Saved credentials use station mode. Missing credentials or an explicit setup
+request starts `OpenWatts-Setup` with wildcard DNS at `192.168.4.1`.
 
-## Not ready for product riding
+The WebUI provides Status, Settings, Calibration, OTA Update, and Diagnostics.
+OTA requires USB, or Maintenance Mode with a qualified battery above the safety
+threshold. Settings use one NVS-backed `DeviceConfig`; display units never
+change stored physical meaning.
 
-- Cadence is a gyro-Z threshold-crossing bring-up stub. It has not been tuned to
-  the installed crank and can count the wrong motion.
-- Provisional Maintenance IMU angle/cadence/confidence is display-only and does
-  not feed BLE or power.
-- Rotation-aware power, deep sleep, and battery protection shutdown are not
-  implemented. Rotation-aware power remains deliberately disabled.
-- Permanent strain calibration has not been validated on the installed bridge.
-- Several persisted compatibility/scaffolding fields are unused; the status
-  document lists each one.
+Default MQTT is retained plain TCP to `192.168.1.28:1883` on
+`openwatts/battery`. Broker authentication and TLS are not implemented.
 
-## Runtime truth
+## Diagnostics
 
-Current firmware uses one initialized application loop and resumes after light
-sleep. A timer wake takes a direct battery-decision branch and can return to
-sleep without the normal sampling body. The compiled `RuntimeMode` names are
-not a dispatcher; timer decisions remain a direct light-sleep fast path.
-
-## Wi-Fi and MQTT
-
-If credentials are missing, setup is explicitly requested, or the setup flag is
-set, firmware starts the open `OpenWatts-Setup` AP with wildcard DNS at
-`http://192.168.4.1/`. With saved credentials and no setup request, it starts
-station mode only; it does not keep the AP running.
-
-Default MQTT is plain TCP at `192.168.1.28:1883`, topic
-`openwatts/battery`. There is no MQTT authentication or TLS configuration.
-Messages are retained. Firmware report history is RAM-only.
-
-## Road estimates
-
-Road speed is a model, not a wheel measurement. Firmware applies 97% drivetrain
-efficiency to the authoritative BLE crank power and solves rolling plus
-aerodynamic resistance using a 10 kg bicycle, CdA 0.40 m2, Crr 0.005, air
-density 1.225 kg/m3, and gravity 9.80665 m/s2. Rider mass defaults to 82 kg.
-Grade and wind are zero in model version 1.
-
-Distance is integrated only while cadence is nonzero and the power sample and
-loop interval are valid. Gaps longer than 250 ms contribute no distance.
-Average estimated speed is completed distance divided by moving time. Every
-ride stores its model version and rider-mass snapshot, so changing settings
-never rewrites an old ride. The WebUI defaults to miles/mph/lb; MQTT publishes
-meters and meters per second with Home Assistant device classes.
+Normal operation retains compact field diagnostics: sensor readiness/failures,
+BLE delivery counters, reset/wake cause, calibration state, and battery health.
+**Debug Logging** enables verbose runtime traces. **Ride diagnostics** adds
+periodic engineering ride logs and should remain off for normal use.
 
 ## Build and test
 
 ```powershell
 cd firmware
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32c3
-& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32c3_diagnostic
-py -3 tests/test_parity_architecture.py
-py -3 tests/test_installation_calibration.py
+python -m unittest discover -s tests -p "test_*.py"
+& "$env:USERPROFILE\.platformio\penv\Scripts\platformio.exe" run -e esp32c3 -e esp32c3_diagnostic
 ```
 
 Tooling is pinned to Espressif32 6.11.0, ESP-IDF 5.4.1, and RISC-V GCC
-14.2.0+20241119. The diagnostic target defines
-`OPENWATTS_DIAGNOSTIC_BUILD=1`, but no current code consumes that macro.
+14.2.0+20241119. Python tests are host-side contract tests; physical BLE,
+sensor, sleep/wake, Wi-Fi, and OTA validation remains required for releases.
 
-The Python tests are host-side contract/source tests, not hardware tests.
+See `../docs/` for calibration, runtime, WebUI, Home Assistant, and validation
+details.
