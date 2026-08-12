@@ -31,6 +31,7 @@
 
 namespace {
 constexpr char kTag[] = "openwatts";
+constexpr int64_t kSleepReportTimeoutUs = 15LL * 1000000LL;
 
 openwatts::DeviceConfig g_config;
 openwatts::Hx711 g_hx711(openwatts::board::kHx711Dout, openwatts::board::kHx711Sck);
@@ -59,6 +60,7 @@ float g_provisional_angle = 0.0F;
 float g_provisional_total_degrees = 0.0F;
 uint32_t g_provisional_revolutions = 0;
 int64_t g_last_provisional_imu_us = 0;
+int64_t g_mqtt_started_us = 0;
 
 const char *wakeReason() {
     switch (esp_sleep_get_wakeup_cause()) {
@@ -172,6 +174,7 @@ bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::Bat
         g_report_history.retry_pending = true;
         return false;
     }
+    g_mqtt_started_us = now_us;
     return true;
 }
 
@@ -185,10 +188,19 @@ void finishBatteryReport(const openwatts::BatteryReading &battery, openwatts::Ba
         g_report_history.last_state = state;
         g_report_history.last_success_seconds = static_cast<uint64_t>(now_us / 1000000LL);
         g_report_history.retry_pending = false;
+        if (g_ride_log.lastRide().mqtt_publish_pending) {
+            g_ride_log.markMqttPublished();
+            const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
+            if (ride_err != ESP_OK) {
+                g_ride_log.markMqttPending();
+                ESP_LOGW(kTag, "last ride acknowledgement save failed: %s", esp_err_to_name(ride_err));
+            }
+        }
     } else {
         g_report_history.retry_pending = true;
     }
     g_mqtt.stop();
+    g_mqtt_started_us = 0;
 }
 
 void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerSample &sample,
@@ -310,6 +322,7 @@ extern "C" void app_main() {
     int64_t last_imu_motion_us = esp_timer_get_time();
     int64_t stationary_since_us = 0;
     bool stationary_zero_attempted = false;
+    bool sleep_report_attempted = false;
     while (true) {
         if (g_timer_decision_pending) {
             openwatts::ledStatus().setSleeping(true);
@@ -501,7 +514,10 @@ extern "C" void app_main() {
                 const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
                 if (ride_err == ESP_OK) {
                     g_ride_log.markSaved();
-                    g_pending_report_reason = openwatts::ReportReason::Manual;
+                    // The durable flag is consumed only when ordinary Normal
+                    // Mode sleep is due. Saving a ride must not start Wi-Fi or
+                    // prevent the inactivity timer from reaching that point.
+                    sleep_report_attempted = false;
                 }
                 else ESP_LOGW(kTag, "last ride save failed: %s", esp_err_to_name(ride_err));
             }
@@ -522,7 +538,40 @@ extern "C" void app_main() {
             .strain_calibration_valid = g_config.strain_calibration_valid,
             .raw_counts = sample.raw_counts, .filtered_counts = sample.filtered_counts, .torque_nm = sample.torque_nm,
             .cadence_rpm = sample.cadence_rpm, .power_watts = sample.power_watts,
-            .revolutions = cadence.revolutions, .hx711_failures = g_hx711.readFailures(),
+            .revolutions = cadence.revolutions,
+            .cadence_corrected_gyro_z_dps = cadence.corrected_gyro_z_dps,
+            .cadence_forward_velocity_dps = cadence.forward_velocity_dps,
+            .cadence_integrated_angle_degrees = cadence.integrated_forward_angle_degrees,
+            .cadence_reverse_angle_degrees = cadence.integrated_reverse_angle_degrees,
+            .cadence_last_candidate_rpm = cadence.last_candidate_rpm,
+            .cadence_imu_invalid_reads = cadence.imu_invalid_reads,
+            .cadence_rejected_revolutions = cadence.rejected_revolution_periods,
+            .cadence_integration_gap_count = cadence.integration_gap_count,
+            .cadence_last_sample_interval_ms = cadence.last_sample_interval_ms,
+            .cadence_dropout_count = cadence.dropout_count,
+            .cadence_last_revolution_age_ms = cadence.last_revolution_us > 0
+                ? static_cast<uint32_t>((now_us - cadence.last_revolution_us) / 1000LL) : 0,
+            .cadence_last_dropout_reason = openwatts::cadenceDropoutReasonName(cadence.last_dropout_reason),
+            .cadence_last_dropout_age_ms = cadence.last_dropout_us > 0
+                ? static_cast<uint32_t>((now_us - cadence.last_dropout_us) / 1000LL) : 0,
+            .ble_last_notify_result = g_ble.lastNotifyResult(),
+            .ble_notify_success_count = g_ble.notifySuccessCount(),
+            .ble_notify_failure_count = g_ble.notifyFailureCount(),
+            .ble_last_power_watts = g_ble.lastNotifiedPowerWatts(),
+            .ble_last_cadence_rpm = g_ble.lastNotifiedCadenceRpm(),
+            .ble_last_crank_revolutions = g_ble.lastNotifiedCrankRevolutions(),
+            .ble_last_crank_event_time = g_ble.lastNotifiedCrankEventTime(),
+            .ble_last_notify_age_ms = g_ble.lastNotifyUs() > 0
+                ? static_cast<uint32_t>((now_us - g_ble.lastNotifyUs()) / 1000LL) : 0,
+            .ble_measurement_subscribed = g_ble.measurementSubscribed(),
+            .ble_transmit_event_count = g_ble.transmitEventCount(),
+            .ble_transmit_error_count = g_ble.transmitErrorCount(),
+            .ble_last_transmit_status = g_ble.lastTransmitStatus(),
+            .ble_disconnect_count = g_ble.disconnectCount(),
+            .ble_last_disconnect_reason = g_ble.lastDisconnectReason(),
+            .ble_connection_interval_units = g_ble.connectionIntervalUnits(),
+            .ble_connection_rssi_dbm = g_ble.connectionRssiDbm(),
+            .hx711_failures = g_hx711.readFailures(),
             .hx711_noise = g_hx711.noiseEstimate(),
             .hx711_sample_rate_hz = g_hx711.sampleRateHz(),
             .wake_reason = wakeReason(), .reset_reason = resetReason(),
@@ -598,10 +647,36 @@ extern "C" void app_main() {
         // queued ride MQTT report has finished; otherwise Normal Mode's short
         // idle timeout could sleep before the summary is saved or published.
         const bool ride_finalize_pending = g_ride_log.active();
-        const bool report_pending = g_pending_report_reason != openwatts::ReportReason::None || g_mqtt.running();
-        if (openwatts::OperatingPolicy::permitsInactivitySleep(g_config) && !current_usb_present && !g_ble.connected() &&
-            !ride_finalize_pending && !report_pending &&
-            g_power_manager.shouldSleepForInactivity(cadence, now_us)) {
+        const bool sleep_due = openwatts::OperatingPolicy::permitsInactivitySleep(g_config) &&
+            !current_usb_present && !g_ble.connected() && !ride_finalize_pending &&
+            g_power_manager.shouldSleepForInactivity(cadence, now_us);
+        if (sleep_due) {
+            const bool ride_report_pending = g_ride_log.lastRide().valid &&
+                g_ride_log.lastRide().mqtt_publish_pending;
+            if (g_mqtt.running()) {
+                if (g_mqtt_started_us != 0 && now_us - g_mqtt_started_us < kSleepReportTimeoutUs) {
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                    continue;
+                }
+                ESP_LOGW(kTag, "pre-sleep MQTT deadline expired; retaining pending ride");
+                g_mqtt.stop();
+                g_mqtt_started_us = 0;
+                g_report_history.retry_pending = true;
+            } else if (ride_report_pending && !sleep_report_attempted &&
+                       g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled) {
+                sleep_report_attempted = true;
+                const openwatts::BatteryState state = g_battery_policy.qualify(status_battery);
+                const esp_err_t wifi_err = g_setup_wifi.active() ? ESP_OK :
+                    g_setup_wifi.begin(g_config, g_settings, false, false, true);
+                if (wifi_err == ESP_OK &&
+                    startBatteryReport(status_battery, state, openwatts::ReportReason::Manual, false, now_us)) {
+                    ESP_LOGI(kTag, "bounded pre-sleep Last Ride report started");
+                    continue;
+                }
+                ESP_LOGW(kTag, "pre-sleep Last Ride report could not start; retaining pending ride");
+                g_report_history.retry_pending = true;
+            }
+            if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present)) g_setup_wifi.stop();
             attemptRideZero(openwatts::RideZeroTrigger::BeforeSleep, sample, imu_stationary, now_us);
             openwatts::PowerManager::WakeResult wake_result{};
             const esp_err_t sleep_err = g_power_manager.enterSleep(g_ble, g_setup_wifi, g_hx711, g_imu, &wake_result);

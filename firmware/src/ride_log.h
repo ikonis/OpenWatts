@@ -8,7 +8,7 @@
 namespace openwatts {
 
 struct LastRideSummary {
-    static constexpr uint32_t kSchemaVersion = 2;
+    static constexpr uint32_t kSchemaVersion = 3;
     uint32_t schema_version = kSchemaVersion;
     uint32_t sequence = 0;
     uint32_t moving_seconds = 0;
@@ -26,6 +26,7 @@ struct LastRideSummary {
     float maximum_estimated_speed_mps = 0.0F;
     uint16_t road_model_version = 0;
     float rider_mass_kg = 0.0F;
+    bool mqtt_publish_pending = false;
 };
 
 class RideLog {
@@ -39,6 +40,8 @@ public:
     bool active() const;
     bool completedPendingSave() const;
     void markSaved();
+    void markMqttPublished();
+    void markMqttPending();
 
 private:
     void resetCurrent();

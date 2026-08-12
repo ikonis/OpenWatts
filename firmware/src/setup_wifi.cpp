@@ -41,7 +41,7 @@ httpd_handle_t g_httpd = nullptr;
 TaskHandle_t g_dns_task = nullptr;
 SetupWifi *g_portal = nullptr;
 esp_timer_handle_t g_station_retry_timer = nullptr;
-char g_status_json[7000]{};
+char g_status_json[7600]{};
 
 struct ImuCaptureSample {
     uint32_t elapsed_ms;
@@ -328,6 +328,17 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   "\"usb\":%s,\"charging\":%s,\"operating_mode\":\"%s\",\"ble\":%s,\"imu\":%s,\"imu_interrupt\":%s,\"imu_whoami\":%u,"
                   "\"accel\":[%.3f,%.3f,%.3f],\"gyro\":[%.2f,%.2f,%.2f],\"hx\":%s,\"calibrated\":%s,\"raw\":%ld,"
                   "\"filtered\":%.2f,\"torque\":%.3f,\"cadence\":%.2f,\"power\":%d,\"revolutions\":%u,\"failures\":%u,"
+                  "\"cadence_diagnostics\":{\"corrected_gyro_z_dps\":%.2f,\"forward_velocity_dps\":%.2f,"
+                  "\"integrated_angle_degrees\":%.2f,\"reverse_angle_degrees\":%.2f,\"last_candidate_rpm\":%.2f,"
+                  "\"imu_invalid_reads\":%u,\"rejected_revolutions\":%u,\"integration_gap_count\":%u,"
+                  "\"last_sample_interval_ms\":%.2f,\"dropout_count\":%u,"
+                  "\"last_revolution_age_ms\":%u,\"last_dropout_reason\":\"%s\",\"last_dropout_age_ms\":%u},"
+                  "\"ble_cps_diagnostics\":{\"last_notify_result\":%d,\"notify_success_count\":%u,"
+                  "\"notify_failure_count\":%u,\"last_power_watts\":%d,\"last_cadence_rpm\":%.2f,"
+                  "\"last_crank_revolutions\":%u,\"last_crank_event_time\":%u,\"last_notify_age_ms\":%u,"
+                  "\"measurement_subscribed\":%s,\"transmit_event_count\":%u,\"transmit_error_count\":%u,"
+                  "\"last_transmit_status\":%d,\"disconnect_count\":%u,\"last_disconnect_reason\":%d,"
+                  "\"connection_interval_ms\":%.2f,\"connection_rssi_dbm\":%d},"
                   "\"hx711_noise\":%.2f,\"hx711_sample_rate_hz\":%.2f,\"strain_signal\":\"%s\","
                   "\"maintenance_tools\":%s,"
                   "\"wake_reason\":\"%s\",\"reset_reason\":\"%s\","
@@ -373,6 +384,30 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   s.strain_calibration_valid ? "true" : "false", static_cast<long>(s.raw_counts),
                   static_cast<double>(s.filtered_counts), static_cast<double>(s.torque_nm), static_cast<double>(s.cadence_rpm),
                   static_cast<int>(s.power_watts), static_cast<unsigned>(s.revolutions), static_cast<unsigned>(s.hx711_failures),
+                  static_cast<double>(s.cadence_corrected_gyro_z_dps),
+                  static_cast<double>(s.cadence_forward_velocity_dps),
+                  static_cast<double>(s.cadence_integrated_angle_degrees),
+                  static_cast<double>(s.cadence_reverse_angle_degrees),
+                  static_cast<double>(s.cadence_last_candidate_rpm),
+                  static_cast<unsigned>(s.cadence_imu_invalid_reads),
+                  static_cast<unsigned>(s.cadence_rejected_revolutions),
+                  static_cast<unsigned>(s.cadence_integration_gap_count),
+                  static_cast<double>(s.cadence_last_sample_interval_ms),
+                  static_cast<unsigned>(s.cadence_dropout_count),
+                  static_cast<unsigned>(s.cadence_last_revolution_age_ms), s.cadence_last_dropout_reason,
+                  static_cast<unsigned>(s.cadence_last_dropout_age_ms),
+                  s.ble_last_notify_result, static_cast<unsigned>(s.ble_notify_success_count),
+                  static_cast<unsigned>(s.ble_notify_failure_count), static_cast<int>(s.ble_last_power_watts),
+                  static_cast<double>(s.ble_last_cadence_rpm),
+                  static_cast<unsigned>(s.ble_last_crank_revolutions),
+                  static_cast<unsigned>(s.ble_last_crank_event_time),
+                  static_cast<unsigned>(s.ble_last_notify_age_ms),
+                  s.ble_measurement_subscribed ? "true" : "false",
+                  static_cast<unsigned>(s.ble_transmit_event_count),
+                  static_cast<unsigned>(s.ble_transmit_error_count), s.ble_last_transmit_status,
+                  static_cast<unsigned>(s.ble_disconnect_count), s.ble_last_disconnect_reason,
+                  static_cast<double>(s.ble_connection_interval_units) * 1.25,
+                  static_cast<int>(s.ble_connection_rssi_dbm),
                   static_cast<double>(s.hx711_noise), static_cast<double>(s.hx711_sample_rate_hz), signal,
                   OperatingPolicy::permitsMaintenanceTools(c) ? "true" : "false", s.wake_reason, s.reset_reason,
                   s.motion_detected ? "true" : "false", static_cast<double>(s.provisional_angle_degrees),

@@ -98,7 +98,7 @@ struct DeviceConfig {
     uint16_t imu_accel_odr_hz = 104;
     uint8_t imu_accel_range_g = 2;
     uint16_t imu_gyro_odr_hz = 104;
-    uint16_t imu_gyro_range_dps = 500;
+    uint16_t imu_gyro_range_dps = 2000;
     uint16_t imu_stationary_timeout_ms = 2000;
     uint8_t rotation_confidence_threshold_percent = 80;
     uint8_t minimum_cadence_rpm = 10;

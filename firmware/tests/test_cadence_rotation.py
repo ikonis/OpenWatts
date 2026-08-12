@@ -13,6 +13,13 @@ class CadenceRotationTests(unittest.TestCase):
     def test_installed_forward_direction_uses_negative_gyro_z(self):
         self.assertIn("forward_velocity_dps = -corrected_z", self.code)
 
+    def test_active_gyro_range_covers_real_crank_velocity_peaks(self):
+        imu = (ROOT / "src" / "imu_lsm6ds3.cpp").read_text(encoding="utf-8")
+        self.assertIn("writeReg(kRegCtrl2G, 0x4C)", imu)
+        self.assertIn("gyro_lsb_per_dps = 70.0F / 1000.0F", imu)
+        config = (ROOT / "src" / "config.h").read_text(encoding="utf-8")
+        self.assertIn("imu_gyro_range_dps = 2000", config)
+
     def test_counts_integrated_full_rotations_not_threshold_crossings(self):
         self.assertIn("forward_delta_degrees = forward_velocity_dps * dt", self.code)
         self.assertIn("forward_angle_degrees_ += forward_delta_degrees", self.code)
@@ -70,8 +77,30 @@ class CadenceRotationTests(unittest.TestCase):
     def test_normal_sleep_waits_for_ride_save_and_report(self):
         main = (ROOT / "src" / "main.cpp").read_text()
         self.assertIn("ride_finalize_pending = g_ride_log.active()", main)
-        self.assertIn("g_pending_report_reason != openwatts::ReportReason::None", main)
-        self.assertIn("!ride_finalize_pending && !report_pending", main)
+        self.assertIn("ride_report_pending = g_ride_log.lastRide().valid", main)
+        self.assertIn("mqtt_publish_pending", main)
+        self.assertIn("bounded pre-sleep Last Ride report started", main)
+        self.assertIn("kSleepReportTimeoutUs", main)
+        self.assertNotIn("!ride_finalize_pending && !report_pending", main)
+
+    def test_last_ride_publish_intent_is_durable_and_acknowledged(self):
+        ride_h = (ROOT / "src" / "ride_log.h").read_text()
+        ride_cpp = (ROOT / "src" / "ride_log.cpp").read_text()
+        storage = (ROOT / "src" / "settings_storage.cpp").read_text()
+        main = (ROOT / "src" / "main.cpp").read_text()
+        self.assertIn("mqtt_publish_pending = false", ride_h)
+        self.assertIn("completed.mqtt_publish_pending = true", ride_cpp)
+        self.assertIn("markMqttPublished", main)
+        self.assertIn("saveLastRide(g_ride_log.lastRide())", main)
+        self.assertIn("LastRideSummaryV2", storage)
+        self.assertIn("summary.mqtt_publish_pending = false", storage)
+
+    def test_failed_pre_sleep_report_cannot_block_sleep_forever(self):
+        main = (ROOT / "src" / "main.cpp").read_text()
+        self.assertIn("now_us - g_mqtt_started_us < kSleepReportTimeoutUs", main)
+        self.assertIn("pre-sleep MQTT deadline expired", main)
+        self.assertIn("retaining pending ride", main)
+        self.assertIn("g_power_manager.enterSleep", main)
 
 
 if __name__ == "__main__":

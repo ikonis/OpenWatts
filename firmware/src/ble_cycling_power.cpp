@@ -1,10 +1,12 @@
 #include "ble_cycling_power.h"
 
 #include <cstdint>
+#include <cmath>
 #include <cstring>
 
 #include "esp_log.h"
 #include "esp_bt.h"
+#include "esp_timer.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
 #include "nimble/nimble_port.h"
@@ -124,6 +126,7 @@ void encodeCyclingPowerMeasurement(const PowerSample &sample, uint8_t payload[8]
 
 esp_err_t BleCyclingPowerService::begin(const char *device_name, int8_t advertising_power_dbm) {
     g_service = this;
+    configured_power_dbm_ = advertising_power_dbm;
     if (device_name != nullptr && device_name[0] != '\0') {
         std::strncpy(device_name_, device_name, sizeof(device_name_) - 1);
         device_name_[sizeof(device_name_) - 1] = '\0';
@@ -169,11 +172,74 @@ void BleCyclingPowerService::notify(const PowerSample &sample) {
 
     uint8_t payload[8]{};
     encodeCyclingPowerMeasurement(sample, payload);
+    last_notified_power_watts_.store(sample.power_watts, std::memory_order_relaxed);
+    last_notified_cadence_x100_.store(static_cast<int32_t>(std::lround(sample.cadence_rpm * 100.0F)),
+                                      std::memory_order_relaxed);
+    last_notified_crank_revolutions_.store(sample.cumulative_crank_revolutions, std::memory_order_relaxed);
+    last_notified_crank_event_time_.store(sample.last_crank_event_time, std::memory_order_relaxed);
+    last_notify_us_.store(esp_timer_get_time(), std::memory_order_relaxed);
 
     os_mbuf *om = ble_hs_mbuf_from_flat(payload, sizeof(payload));
     if (om != nullptr) {
-        ble_gatts_notify_custom(conn_handle_.load(std::memory_order_relaxed), g_measurement_handle, om);
+        const int rc = ble_gatts_notify_custom(conn_handle_.load(std::memory_order_relaxed), g_measurement_handle, om);
+        last_notify_result_.store(rc, std::memory_order_relaxed);
+        if (rc == 0) notify_success_count_.fetch_add(1, std::memory_order_relaxed);
+        else {
+            notify_failure_count_.fetch_add(1, std::memory_order_relaxed);
+            ESP_LOGW(kTag, "CPS notify failed rc=%d power=%d rpm=%.1f revolutions=%u event=%u", rc,
+                     static_cast<int>(sample.power_watts), static_cast<double>(sample.cadence_rpm),
+                     static_cast<unsigned>(sample.cumulative_crank_revolutions),
+                     static_cast<unsigned>(sample.last_crank_event_time));
+        }
+    } else {
+        last_notify_result_.store(BLE_HS_ENOMEM, std::memory_order_relaxed);
+        notify_failure_count_.fetch_add(1, std::memory_order_relaxed);
+        ESP_LOGW(kTag, "CPS notify allocation failed");
     }
+}
+
+int BleCyclingPowerService::lastNotifyResult() const { return last_notify_result_.load(std::memory_order_relaxed); }
+uint32_t BleCyclingPowerService::notifySuccessCount() const { return notify_success_count_.load(std::memory_order_relaxed); }
+uint32_t BleCyclingPowerService::notifyFailureCount() const { return notify_failure_count_.load(std::memory_order_relaxed); }
+int16_t BleCyclingPowerService::lastNotifiedPowerWatts() const { return last_notified_power_watts_.load(std::memory_order_relaxed); }
+float BleCyclingPowerService::lastNotifiedCadenceRpm() const {
+    return static_cast<float>(last_notified_cadence_x100_.load(std::memory_order_relaxed)) / 100.0F;
+}
+uint16_t BleCyclingPowerService::lastNotifiedCrankRevolutions() const {
+    return last_notified_crank_revolutions_.load(std::memory_order_relaxed);
+}
+uint16_t BleCyclingPowerService::lastNotifiedCrankEventTime() const {
+    return last_notified_crank_event_time_.load(std::memory_order_relaxed);
+}
+int64_t BleCyclingPowerService::lastNotifyUs() const { return last_notify_us_.load(std::memory_order_relaxed); }
+bool BleCyclingPowerService::measurementSubscribed() const {
+    return measurement_subscribed_.load(std::memory_order_relaxed);
+}
+uint32_t BleCyclingPowerService::transmitEventCount() const {
+    return transmit_event_count_.load(std::memory_order_relaxed);
+}
+uint32_t BleCyclingPowerService::transmitErrorCount() const {
+    return transmit_error_count_.load(std::memory_order_relaxed);
+}
+int BleCyclingPowerService::lastTransmitStatus() const {
+    return last_transmit_status_.load(std::memory_order_relaxed);
+}
+uint32_t BleCyclingPowerService::disconnectCount() const {
+    return disconnect_count_.load(std::memory_order_relaxed);
+}
+int BleCyclingPowerService::lastDisconnectReason() const {
+    return last_disconnect_reason_.load(std::memory_order_relaxed);
+}
+uint16_t BleCyclingPowerService::connectionIntervalUnits() const {
+    return connection_interval_units_.load(std::memory_order_relaxed);
+}
+int8_t BleCyclingPowerService::connectionRssiDbm() {
+    if (!connected_.load(std::memory_order_relaxed)) return -127;
+    int8_t rssi = -127;
+    if (ble_gap_conn_rssi(conn_handle_.load(std::memory_order_relaxed), &rssi) == 0) {
+        connection_rssi_dbm_.store(rssi, std::memory_order_relaxed);
+    }
+    return connection_rssi_dbm_.load(std::memory_order_relaxed);
 }
 
 void BleCyclingPowerService::setDiagnostics(const char *text) {
@@ -248,14 +314,54 @@ int BleCyclingPowerService::onGapEvent(ble_gap_event *event) {
             connected_.store(event->connect.status == 0, std::memory_order_relaxed);
             if (connected_.load(std::memory_order_relaxed)) {
                 conn_handle_.store(event->connect.conn_handle, std::memory_order_relaxed);
+                const esp_err_t power_err = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0,
+                                                                 closestPowerLevel(configured_power_dbm_));
+                if (power_err != ESP_OK) {
+                    ESP_LOGW(kTag, "could not set connection power: %s", esp_err_to_name(power_err));
+                }
+                ble_gap_conn_desc desc{};
+                if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
+                    connection_interval_units_.store(desc.conn_itvl, std::memory_order_relaxed);
+                }
             } else {
                 advertise();
             }
             break;
         case BLE_GAP_EVENT_DISCONNECT:
             connected_.store(false, std::memory_order_relaxed);
+            measurement_subscribed_.store(false, std::memory_order_relaxed);
+            disconnect_count_.fetch_add(1, std::memory_order_relaxed);
+            last_disconnect_reason_.store(event->disconnect.reason, std::memory_order_relaxed);
+            ESP_LOGW(kTag, "BLE disconnected reason=%d", event->disconnect.reason);
             advertise();
             break;
+        case BLE_GAP_EVENT_SUBSCRIBE:
+            if (event->subscribe.attr_handle == g_measurement_handle) {
+                measurement_subscribed_.store(event->subscribe.cur_notify != 0, std::memory_order_relaxed);
+                ESP_LOGI(kTag, "CPS subscription notify=%u reason=%u",
+                         static_cast<unsigned>(event->subscribe.cur_notify),
+                         static_cast<unsigned>(event->subscribe.reason));
+            }
+            break;
+        case BLE_GAP_EVENT_NOTIFY_TX:
+            if (event->notify_tx.attr_handle == g_measurement_handle) {
+                transmit_event_count_.fetch_add(1, std::memory_order_relaxed);
+                last_transmit_status_.store(event->notify_tx.status, std::memory_order_relaxed);
+                if (event->notify_tx.status != 0) {
+                    transmit_error_count_.fetch_add(1, std::memory_order_relaxed);
+                    ESP_LOGW(kTag, "CPS transmit event failed status=%d", event->notify_tx.status);
+                }
+            }
+            break;
+        case BLE_GAP_EVENT_CONN_UPDATE: {
+            ble_gap_conn_desc desc{};
+            if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
+                connection_interval_units_.store(desc.conn_itvl, std::memory_order_relaxed);
+                ESP_LOGI(kTag, "BLE connection interval updated to %.2f ms",
+                         static_cast<double>(desc.conn_itvl) * 1.25);
+            }
+            break;
+        }
         case BLE_GAP_EVENT_ADV_COMPLETE:
             advertise();
             break;

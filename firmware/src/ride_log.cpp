@@ -87,6 +87,7 @@ void RideLog::finish(int64_t now_us, const char *reason) {
     completed.maximum_estimated_speed_mps = maximum_estimated_speed_mps_;
     completed.road_model_version = RoadModel::kVersion;
     completed.rider_mass_kg = rider_mass_kg_;
+    completed.mqtt_publish_pending = true;
     completed.valid = true;
     std::strncpy(completed.end_reason, reason, sizeof(completed.end_reason) - 1);
     last_ = completed;
@@ -106,5 +107,7 @@ bool RideLog::candidate() const { return candidate_; }
 bool RideLog::active() const { return qualified_; }
 bool RideLog::completedPendingSave() const { return pending_save_; }
 void RideLog::markSaved() { pending_save_ = false; }
+void RideLog::markMqttPublished() { last_.mqtt_publish_pending = false; }
+void RideLog::markMqttPending() { last_.mqtt_publish_pending = true; }
 
 }  // namespace openwatts

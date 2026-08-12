@@ -54,9 +54,12 @@ esp_err_t Lsm6ds3::configureActiveMode() {
     ESP_RETURN_ON_ERROR(writeReg(kRegCtrl3C, 0x44), kTag, "CTRL3_C active");
     ESP_RETURN_ON_ERROR(writeReg(kRegTapCfg, 0x00), kTag, "TAP_CFG active");
     ESP_RETURN_ON_ERROR(writeReg(kRegMd1Cfg, 0x00), kTag, "MD1_CFG active");
-    // 104 Hz accelerometer +/-4 g and gyro 500 dps.
+    // 104 Hz accelerometer +/-4 g and gyro +/-2000 dps. A crank's
+    // instantaneous angular velocity is strongly non-uniform through the
+    // pedal stroke; +/-500 dps clips power-stroke peaks even around 65 RPM
+    // average cadence and causes angle integration to miss revolutions.
     ESP_RETURN_ON_ERROR(writeReg(kRegCtrl1Xl, 0x48), kTag, "CTRL1_XL active");
-    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl2G, 0x44), kTag, "CTRL2_G active");
+    ESP_RETURN_ON_ERROR(writeReg(kRegCtrl2G, 0x4C), kTag, "CTRL2_G active");
     return clearWakeSource();
 }
 
@@ -89,7 +92,7 @@ bool Lsm6ds3::read(ImuSample &sample) {
         return false;
     }
 
-    constexpr float gyro_lsb_per_dps = 17.50F / 1000.0F;
+    constexpr float gyro_lsb_per_dps = 70.0F / 1000.0F;
     constexpr float accel_lsb_per_g = 0.122F / 1000.0F;
     sample.gyro_dps[0] = static_cast<float>(le16(&raw[0])) * gyro_lsb_per_dps;
     sample.gyro_dps[1] = static_cast<float>(le16(&raw[2])) * gyro_lsb_per_dps;

@@ -14,6 +14,26 @@ constexpr char kNamespace[] = "openwatts";
 constexpr char kConfigKey[] = "config";
 constexpr char kLastRideKey[] = "last_ride";
 
+struct LastRideSummaryV2 {
+    uint32_t schema_version;
+    uint32_t sequence;
+    uint32_t moving_seconds;
+    uint32_t elapsed_seconds;
+    uint32_t crank_revolutions;
+    float average_power_watts;
+    int16_t maximum_power_watts;
+    float average_cadence_rpm;
+    float maximum_cadence_rpm;
+    float work_kj;
+    bool valid;
+    char end_reason[24];
+    float estimated_distance_meters;
+    float average_estimated_speed_mps;
+    float maximum_estimated_speed_mps;
+    uint16_t road_model_version;
+    float rider_mass_kg;
+};
+
 struct LastRideSummaryV1 {
     uint32_t schema_version;
     uint32_t sequence;
@@ -198,8 +218,44 @@ LastRideSummary SettingsStorage::loadLastRide() {
     if (size == sizeof(summary)) {
         err = nvs_get_blob(handle, kLastRideKey, &summary, &size);
         nvs_close(handle);
-        return err == ESP_OK && summary.schema_version == LastRideSummary::kSchemaVersion
-            ? summary : LastRideSummary{};
+        if (err != ESP_OK || !summary.valid) return LastRideSummary{};
+        if (summary.schema_version == LastRideSummary::kSchemaVersion) return summary;
+        // The appended v3 bool can occupy v2 tail padding, making both blobs
+        // the same size on this target. The preceding fields have identical
+        // offsets, so migrate by version before rejecting the record.
+        if (summary.schema_version == 2) {
+            summary.schema_version = LastRideSummary::kSchemaVersion;
+            summary.mqtt_publish_pending = false;
+            return summary;
+        }
+        return LastRideSummary{};
+    }
+    if (size == sizeof(LastRideSummaryV2)) {
+        LastRideSummaryV2 legacy{};
+        err = nvs_get_blob(handle, kLastRideKey, &legacy, &size);
+        nvs_close(handle);
+        if (err != ESP_OK || legacy.schema_version != 2 || !legacy.valid) return LastRideSummary{};
+        summary.sequence = legacy.sequence;
+        summary.moving_seconds = legacy.moving_seconds;
+        summary.elapsed_seconds = legacy.elapsed_seconds;
+        summary.crank_revolutions = legacy.crank_revolutions;
+        summary.average_power_watts = legacy.average_power_watts;
+        summary.maximum_power_watts = legacy.maximum_power_watts;
+        summary.average_cadence_rpm = legacy.average_cadence_rpm;
+        summary.maximum_cadence_rpm = legacy.maximum_cadence_rpm;
+        summary.work_kj = legacy.work_kj;
+        summary.valid = true;
+        std::strncpy(summary.end_reason, legacy.end_reason, sizeof(summary.end_reason) - 1);
+        summary.estimated_distance_meters = legacy.estimated_distance_meters;
+        summary.average_estimated_speed_mps = legacy.average_estimated_speed_mps;
+        summary.maximum_estimated_speed_mps = legacy.maximum_estimated_speed_mps;
+        summary.road_model_version = legacy.road_model_version;
+        summary.rider_mass_kg = legacy.rider_mass_kg;
+        // A v2 record predates durable acknowledgement state. It was already
+        // eligible for publication in prior firmware, so do not invent a
+        // duplicate report during migration.
+        summary.mqtt_publish_pending = false;
+        return summary;
     }
     if (size == sizeof(LastRideSummaryV1)) {
         LastRideSummaryV1 legacy{};
