@@ -1,5 +1,14 @@
 .history/
 *.lck
+*.kicad_prl
+*.kicad_sch-bak
+*.kicad_pcb-bak
+*-backups/
+_autosave-*
+*.dsn
+*.ses
+*-erc.rpt
+*-drc.rpt
 firmware/.pio/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults

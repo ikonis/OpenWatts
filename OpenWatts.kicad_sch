@@ -4,6 +4,14 @@
 	(generator_version "10.0")
 	(uuid "78e671d9-8dc5-401d-a0ec-b868e0623f5f")
 	(paper "A4")
+	(title_block
+		(title "OpenWatts Cycling Power Meter")
+		(date "2026-07-06")
+		(rev "RevA")
+		(company "OpenWatts")
+		(comment 1 "Manufactured and field-validated hardware revision")
+		(comment 2 "ESP32-C3 / HX711 strain measurement / LSM6DS3 cadence")
+	)
 	(lib_symbols
 		(symbol "Analog_ADC:HX711"
 			(exclude_from_sim no)
@@ -4350,6 +4358,36 @@
 			)
 			(embedded_fonts no)
 		)
+	)
+	(text "USB-C INPUT"
+		(at 17.78 17.78 0)
+		(effects (font (size 1.778 1.778) (bold yes)) (justify left bottom))
+		(uuid "a29cb4c6-e7c2-45bb-9971-e43f46480253")
+	)
+	(text "LiPo CHARGING & 3.3 V POWER"
+		(at 76.2 17.78 0)
+		(effects (font (size 1.778 1.778) (bold yes)) (justify left bottom))
+		(uuid "6545dfa5-849d-4240-97c3-a1d313852678")
+	)
+	(text "ESP32-C3, USB & SERVICE I/O"
+		(at 137.16 17.78 0)
+		(effects (font (size 1.778 1.778) (bold yes)) (justify left bottom))
+		(uuid "42ff9b0b-e908-497b-a17b-9ef0482e2b50")
+	)
+	(text "STRAIN BRIDGE & HX711"
+		(at 17.78 96.52 0)
+		(effects (font (size 1.778 1.778) (bold yes)) (justify left bottom))
+		(uuid "ce759474-8899-43ea-94bc-4c833d457cc7")
+	)
+	(text "IMU & MOTION SENSING"
+		(at 88.9 96.52 0)
+		(effects (font (size 1.778 1.778) (bold yes)) (justify left bottom))
+		(uuid "14d61a02-fbcb-4ae2-b859-aeaa0af03c0e")
+	)
+	(text "BATTERY / USB SENSE & STATUS"
+		(at 111.76 76.2 0)
+		(effects (font (size 1.524 1.524) (bold yes)) (justify left bottom))
+		(uuid "b9770dae-9ce7-4510-9655-ab8015213717")
 	)
 	(junction
 		(at 46.99 41.91)
