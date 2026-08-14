@@ -1,7 +1,8 @@
 # First ride validation
 
-Do not treat the current cadence output as production-ready. Before riding,
-complete the installed bridge and IMU checks in `VALIDATION.md`.
+Cadence and power have passed practical installed-crank ride validation. Use
+this procedure as a regression check after calibration, mounting, sensor, BLE,
+or cadence changes.
 
 During the first short controlled ride, record:
 
@@ -17,4 +18,5 @@ During the first short controlled ride, record:
 When enabled, ride history begins only from calibrated, valid samples. Cadence
 must remain active for ten seconds and accumulate the configured minimum moving
 duration. Five minutes at zero cadence completes and persists the latest ride.
-Preserve external evidence as well until installed-crank cadence is validated.
+Compare the saved Last Ride with SmartSpin2K/MyWhoosh as an external regression
+check.

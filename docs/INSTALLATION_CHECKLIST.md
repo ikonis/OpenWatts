@@ -8,10 +8,10 @@
 6. Mount the enclosure and secure every bridge/USB/battery connection.
 7. Confirm Normal Mode inactivity sleep, IMU wake, and USB wake.
 8. Return to Maintenance, remove USB, and capture installed-crank IMU behavior.
-9. Compare active IMU cadence against counted revolutions; do not assume it
-   is accurate because values appear.
-10. Pair BLE and perform a short controlled ride only after cadence evidence is
-    acceptable.
+9. Compare active IMU cadence against counted revolutions and the previously
+   validated installed-crank behavior.
+10. Pair BLE through SmartSpin2K and perform a short controlled verification
+    ride.
 11. Return to Normal Mode when maintenance is finished.
 
 The Diagnostics page contains a shorter checklist. Use `VALIDATION.md` for the

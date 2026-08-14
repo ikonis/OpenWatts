@@ -1,8 +1,9 @@
 # Validation status and checklist
 
-The repository contains host-side contract tests and successful build
-configuration, but it does not contain a complete recorded hardware validation
-report. Do not infer a physical pass from source code or a Python test.
+The assembled RevA has completed practical calibration and ride validation for
+the 1.1.0 product milestone. Host tests and builds remain contract checks rather
+than substitutes for physical validation after future firmware or hardware
+changes.
 
 ## Automated coverage
 
@@ -55,14 +56,14 @@ diagnostic macro is currently unused.
 3. Compare threshold crossings against actual revolutions at slow, 60, and
    90 RPM, including reverse motion and start/stop.
 4. Verify motion wake does not itself count a revolution.
-5. Treat current BLE cadence/power as experimental until the cadence provider
-   passes the above comparisons.
+5. Confirm BLE cadence/power remains consistent with the validated
+   OpenWatts -> SmartSpin2K -> MyWhoosh topology.
 6. Verify BLE CPS pairing, signed-safe power, crank event timing, reconnection,
    and sleep after disconnect.
 
-## Ride diagnostics limitation
+## Ride diagnostics
 
 The current Ride Diagnostics setting adds one periodic serial log line containing
 RPM, power, raw HX711, sensor readiness, revolutions, BLE, and Wi-Fi state. It
-does not publish high-rate MQTT traces and does not include the complete list of
-raw/filtered/rejection metrics previously proposed.
+does not publish a high-rate MQTT trace. The WebUI supplies live field and IMU
+diagnostics on demand without adding continuous network traffic.

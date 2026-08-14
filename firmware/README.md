@@ -1,5 +1,9 @@
 # OpenWatts firmware
 
+Firmware 1.1.0 is the first post-installation product milestone. The assembled
+RevA has completed calibration, BLE/SmartSpin2K riding, cadence, ride-history,
+battery, sleep/wake, WebUI, OTA, MQTT, and Home Assistant field validation.
+
 OpenWatts is an ESP32-C3 cycling power meter using an HX711 strain channel and
 an LSM6DS3 IMU. The firmware provides BLE Cycling Power, persistent calibration
 and Ride Zero, ride history, battery-conscious sleep, USB/Maintenance Wi-Fi,
@@ -43,7 +47,8 @@ defaults to Imperial presentation; MQTT remains SI-native for Home Assistant.
 Saved credentials use station mode. Missing credentials or an explicit setup
 request starts `OpenWatts-Setup` with wildcard DNS at `192.168.4.1`.
 
-The WebUI provides Status, Settings, Calibration, OTA Update, and Diagnostics.
+The WebUI provides Status, a phone-first live Ride dashboard, Settings,
+Calibration, OTA Update, and Diagnostics.
 OTA requires USB, or Maintenance Mode with a qualified battery above the safety
 threshold. Settings use one NVS-backed `DeviceConfig`; display units never
 change stored physical meaning.

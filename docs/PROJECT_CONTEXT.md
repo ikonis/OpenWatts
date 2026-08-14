@@ -4,6 +4,9 @@ OpenWatts is a standalone ESP32-C3/LSM6DS3/HX711 cycling power meter. The RevA
 PCB is assembled and fixed; firmware must follow `firmware/src/board.h` and must
 not assume hardware changes.
 
+Firmware 1.1.0 is the working-product baseline. Further work is feature work or
+targeted corrective maintenance; a RevB is not currently planned.
+
 ## Product policy
 
 - Normal Mode prioritizes riding and battery life.
@@ -23,7 +26,8 @@ wake ESP32-C3 from deep sleep, so the LSM6DS3 motion interrupt uses light sleep.
 Timer wakes take a direct battery-policy branch and return to sleep when no
 report is required.
 
-Normal Mode permits temporary Wi-Fi only for USB or a bounded report. A pending
+Normal Mode permits Wi-Fi for USB, the live dashboard during a ride candidate,
+or a bounded report. A pending
 Last Ride does not itself prevent the inactivity timer. Once sleep is otherwise
 due, one QoS 1 publish is attempted for at most 15 seconds; success clears the
 durable pending flag and failure defers retry without blocking sleep.

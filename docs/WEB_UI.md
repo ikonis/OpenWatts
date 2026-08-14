@@ -1,5 +1,9 @@
 # Web Interface
 
+Firmware 1.1.0 presents one consistent responsive product interface across
+desktop and mobile. The OpenWatts logo returns to Status and the shared header
+contains Status, Ride, Settings, Calibration, OTA Update, and Diagnostics.
+
 - Status: ordinary device, battery, connection and readiness information.
 - Settings: authoritative NVS-backed controls; unsafe items remain disabled.
 - Calibration: strain assessment, staged Bench Calibration, Manual Tare,
@@ -34,10 +38,10 @@ Actions return inline success/failure messages. `/status` is authoritative.
 
 ## Deliberately disabled or display-only
 
-Rotation-aware power remains disabled because the installed-crank angle model
-has not been validated. Diagnostics provisional IMU output remains observation
-only and cannot feed production power. Last Ride is stored locally; it is not
-added to the battery MQTT payload.
+Rotation-aware sector weighting remains disabled because the product does not
+need an absolute crank-angle model. Diagnostics provisional IMU output remains
+observation only and cannot feed production power. Last Ride is stored locally
+and published through the existing retained MQTT payload when pending.
 
 There is no general Reboot or Factory Reset action in the current WebUI.
 # Live Ride dashboard
@@ -48,7 +52,7 @@ and distance, and battery state through the existing `/status` snapshot.
 
 The browser independently polls
 `http://smartspin2k.local/runtimeConfigJSON` approximately once per second for
-measured/target power, cadence, heart rate, resistance, target resistance,
+measured/target power, cadence, heart rate, resistance,
 logical shifter position, and FTMS control mode. OpenWatts does not proxy or
 persist this SmartSpin2K data. A missing or malformed SS2K value displays as
 zero or unavailable and cannot affect BLE CPS or ride recording.

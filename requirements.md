@@ -10,8 +10,8 @@ changes.
 - Use the fitted LSM6DS3 for motion wake and, after validation, cadence and
   rotational information.
 - In Normal Mode, provide Wi-Fi/configuration only with USB; in deliberate
-  Maintenance Mode, allow Wi-Fi/WebUI to remain active on battery. OTA remains
-  USB-only.
+  Maintenance Mode, allow Wi-Fi/WebUI to remain active on battery. OTA is
+  permitted on USB or from a qualified Maintenance-mode battery above 3.75 V.
 - Provide optional, policy-controlled MQTT/Home Assistant battery reports.
 - Report battery voltage and charging/USB state.
 - Preserve calibration and credentials across firmware migration.

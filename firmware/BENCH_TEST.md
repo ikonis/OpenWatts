@@ -1,5 +1,9 @@
 # OpenWatts Bench Test
 
+This is a service/reassembly procedure for the validated RevA product, not an
+uncompleted bring-up checklist. Repeat it after bridge, enclosure, connector, or
+crank work that could affect sensor integrity or calibration.
+
 Before connecting the bridge, confirm USB, battery, Wi-Fi, OTA, BLE advertising,
 IMU identity/vectors and honest strain-signal classification. HX711 conversions
 with an open input are not proof of a complete bridge.
