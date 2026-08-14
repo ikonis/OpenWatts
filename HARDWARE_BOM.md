@@ -62,7 +62,7 @@ invented here.
 | Strain gauges | Bonded foil gauges wired as the installed crank bridge | Exact gauge manufacturer/part is not established in the repository |
 | Battery | Protected single-cell LiPo compatible with the JST-PH connection and enclosure | Capacity and exact supplier are build-specific |
 | Crank | Left crank prepared for bonded gauges and enclosure mounting | Calibration is installation-specific |
-| Enclosure | See `mechanical/OpenWatts_RevA_Enclosure.step` and assembly model | Verify print/material/fastening for the actual installation |
+| Enclosure | See `mechanical/OpenWatts_RevA_Enclosed_Assembly.step` for the fitted board-and-case assembly | Verify print/material/fastening for the actual installation |
 | Wiring/connectors | Mating JST-PH battery and JST-XH strain harnesses | Observe actual polarity and connector orientation |
 | Gauge adhesive/protection | Suitable strain-gauge bonding and environmental protection system | Exact product is not established in the repository |
 
