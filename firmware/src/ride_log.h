@@ -34,6 +34,7 @@ public:
     void begin(const LastRideSummary &stored);
     bool update(const PowerSample &sample, int64_t now_us, uint32_t qualification_seconds,
                 float rider_mass_kg);
+    bool finishForUsbConnection(int64_t now_us);
     void clear();
     const LastRideSummary &lastRide() const;
     bool candidate() const;

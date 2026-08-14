@@ -328,6 +328,7 @@ extern "C" void app_main() {
     // and remains set until the ordinary post-ride reporting/sleep boundary.
     bool ride_wifi_latched = false;
     bool ride_wifi_start_attempted = false;
+    bool usb_ride_finalize_pending = false;
     while (true) {
         if (g_timer_decision_pending) {
             openwatts::ledStatus().setSleeping(true);
@@ -420,19 +421,34 @@ extern "C" void app_main() {
                                                           : openwatts::ReportReason::UsbDisconnected;
             if (current_usb_present) {
                 g_ride_zero.resetLifecycle();
+                usb_ride_finalize_pending = g_ride_log.active();
+                ride_wifi_latched = false;
+                ride_wifi_start_attempted = false;
                 usb_removed_zero_due_us = 0;
                 usb_inserted_zero_due_us = now_us + 2000000LL;
-                const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, true, false);
+                // Consume USB_CONNECTED promptly so a just-finalized ride is
+                // included in the first available USB reporting cycle.
+                last_battery_policy_check_us = -5LL * 1000LL * 1000LL;
+                const esp_err_t wifi_err = g_setup_wifi.active() ? ESP_OK :
+                    g_setup_wifi.begin(g_config, g_settings, true, false);
                 if (wifi_err != ESP_OK) {
                     ESP_LOGW(kTag, "Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
                 }
-            } else if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) &&
-                       !ride_wifi_latched) {
-                usb_removed_zero_due_us = now_us + 2000000LL;
-                g_setup_wifi.stop();
             } else {
                 usb_removed_zero_due_us = now_us + 2000000LL;
-                ESP_LOGI(kTag, "USB removed; Maintenance Mode keeps Wi-Fi and WebUI active");
+                // Keep the already-running dashboard available during the
+                // possible-ride window. If no ride begins, the ordinary
+                // Normal Mode inactivity path shuts Wi-Fi down before sleep.
+                ride_wifi_latched = true;
+                ride_wifi_start_attempted = g_setup_wifi.active();
+                if (!g_setup_wifi.active() && g_config.hasWifiCredentials()) {
+                    ride_wifi_start_attempted = true;
+                    const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, false, false, true);
+                    if (wifi_err != ESP_OK) {
+                        ESP_LOGW(kTag, "post-USB dashboard Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
+                    }
+                }
+                ESP_LOGI(kTag, "USB removed; dashboard remains available until ride completion or sleep");
             }
         }
         // A Settings save can change Operating Mode without a USB edge.
@@ -514,8 +530,16 @@ extern "C" void app_main() {
             }
         }
         if (g_config.ride_detection_enabled && g_config.strain_calibration_valid) {
-            const bool ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds,
-                                                          g_config.rider_mass_kg);
+            bool ride_completed = false;
+            if (usb_ride_finalize_pending && !cadence.moving) {
+                ride_completed = g_ride_log.finishForUsbConnection(now_us);
+                usb_ride_finalize_pending = false;
+                if (ride_completed) ESP_LOGI(kTag, "qualified ride finalized by USB connection");
+            }
+            if (!ride_completed) {
+                ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds,
+                                                   g_config.rider_mass_kg);
+            }
             if (ride_completed) g_ride_zero.resetLifecycle();
             if (g_ride_log.completedPendingSave()) {
                 const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
@@ -529,7 +553,7 @@ extern "C" void app_main() {
                 else ESP_LOGW(kTag, "last ride save failed: %s", esp_err_to_name(ride_err));
             }
         }
-        if (g_ride_log.active() && !ride_wifi_latched) {
+        if (g_ride_log.candidate() && !ride_wifi_latched) {
             ride_wifi_latched = true;
             if (!g_setup_wifi.active() && !ride_wifi_start_attempted && g_config.hasWifiCredentials()) {
                 ride_wifi_start_attempted = true;
@@ -539,7 +563,7 @@ extern "C" void app_main() {
                     // loop or let a network failure disturb this ride.
                     ESP_LOGW(kTag, "ride dashboard Wi-Fi start failed: %s", esp_err_to_name(wifi_err));
                 } else {
-                    ESP_LOGI(kTag, "qualified ride started; ride dashboard available");
+                    ESP_LOGI(kTag, "ride candidate detected; ride dashboard available");
                 }
             }
         }

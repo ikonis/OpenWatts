@@ -53,7 +53,11 @@ logical shifter position, and FTMS control mode. OpenWatts does not proxy or
 persist this SmartSpin2K data. A missing or malformed SS2K value displays as
 zero or unavailable and cannot affect BLE CPS or ride recording.
 
-In Normal Mode, Wi-Fi starts once the existing ride logger qualifies a ride and
-remains available through the existing post-ride reporting and sleep boundary.
-Network startup is attempted once and failure never creates a sampling-loop
-retry. Maintenance Mode behavior is unchanged.
+In Normal Mode, removing USB keeps the already-running dashboard available
+through the possible ride and its normal post-ride reporting/sleep boundary.
+After a motion-only wake, Wi-Fi starts once cadence has formed a ride candidate
+(normally after 10 seconds) rather than waiting for full ride qualification.
+Reconnecting USB while a qualified ride is active finalizes it as soon as
+cadence is zero, persists it, and queues its normal MQTT report. Network startup
+is attempted once and failure never creates a sampling-loop retry. Maintenance
+Mode behavior is unchanged.

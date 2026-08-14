@@ -66,6 +66,12 @@ bool RideLog::update(const PowerSample &sample, int64_t now_us, uint32_t qualifi
     return false;
 }
 
+bool RideLog::finishForUsbConnection(int64_t now_us) {
+    if (!qualified_) return false;
+    finish(now_us, "usb_connected");
+    return true;
+}
+
 void RideLog::finish(int64_t now_us, const char *reason) {
     LastRideSummary completed{};
     completed.sequence = last_.sequence + 1U;

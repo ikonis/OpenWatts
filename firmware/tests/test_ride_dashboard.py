@@ -42,10 +42,17 @@ class RideDashboardTests(unittest.TestCase):
     def test_normal_ride_wifi_is_bounded_and_non_retrying(self):
         self.assertIn("bool ride_wifi_latched = false", self.main)
         self.assertIn("bool ride_wifi_start_attempted = false", self.main)
-        self.assertIn("if (g_ride_log.active() && !ride_wifi_latched)", self.main)
+        self.assertIn("if (g_ride_log.candidate() && !ride_wifi_latched)", self.main)
         self.assertIn("!g_setup_wifi.active() && !ride_wifi_start_attempted", self.main)
         self.assertIn("ride_wifi_latched = false", self.main)
         self.assertIn("ride_wifi_start_attempted = false", self.main)
+
+    def test_usb_edges_preserve_dashboard_and_finalize_a_qualified_ride(self):
+        self.assertIn("USB removed; dashboard remains available", self.main)
+        self.assertIn("ride_wifi_latched = true", self.main)
+        self.assertIn("usb_ride_finalize_pending = g_ride_log.active()", self.main)
+        self.assertIn("finishForUsbConnection", self.main)
+        self.assertIn('finish(now_us, "usb_connected")', self.ride_log)
 
 
 if __name__ == "__main__":
