@@ -53,8 +53,9 @@ OTA requires USB, or Maintenance Mode with a qualified battery above the safety
 threshold. Settings use one NVS-backed `DeviceConfig`; display units never
 change stored physical meaning.
 
-Default MQTT is retained plain TCP to `192.168.1.28:1883` on
-`openwatts/battery`. Broker authentication and TLS are not implemented.
+MQTT uses retained plain TCP on `openwatts/battery`. New devices have no
+broker configured; enter the deployment broker in Settings. Broker
+authentication and TLS are not implemented.
 
 ## Diagnostics
 

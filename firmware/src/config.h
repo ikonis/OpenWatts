@@ -41,7 +41,7 @@ struct DeviceConfig {
     uint8_t imu_wake_duration = 1;
     char ble_device_name[19] = "OpenWatts";
     bool mqtt_battery_notifications_enabled = true;
-    char mqtt_host[64] = "192.168.1.28";
+    char mqtt_host[64]{};
     uint16_t mqtt_port = 1883;
     char mqtt_topic[96] = "openwatts/battery";
     uint8_t mqtt_charge_soon_percent = 20;
