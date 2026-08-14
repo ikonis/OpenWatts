@@ -58,4 +58,15 @@ setup, calibration, architecture, Home Assistant, and test notes.
 
 ## License
 
-This repository does not have a license yet.
+OpenWatts is open hardware and open-source software:
+
+- Hardware design, fabrication, and mechanical files:
+  [CERN-OHL-P-2.0](LICENSES/CERN-OHL-P-2.0.txt)
+- Firmware, WebUI, scripts, and documentation: [MIT](LICENSES/MIT.txt)
+
+See [LICENSE.md](LICENSE.md) for the exact scope and warranty notice.
+
+OpenWatts is provided as-is, without warranty. Building or using it is entirely
+at your own risk. I am not responsible for injury, damaged equipment, battery
+problems, inaccurate measurements, data loss, or other losses resulting from
+its construction or use.
