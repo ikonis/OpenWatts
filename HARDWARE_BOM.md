@@ -1,9 +1,8 @@
 # OpenWatts RevA hardware BOM
 
-This is a human-readable BOM for the **currently manufactured RevA board**. It
-is derived from the checked-in schematic, PCB, and July 6 PCBWay assembly BOM.
-Blank manufacturer fields are intentional where the repository establishes
-only a value or specification.
+This BOM covers the manufactured RevA board. It is based on the checked-in
+schematic, PCB, and July 6 PCBWay assembly files. Where only a value or package
+is known, that is all that is listed.
 
 ## MCU and sensors
 
@@ -67,7 +66,7 @@ invented here.
 | Wiring/connectors | Mating JST-PH battery and JST-XH strain harnesses | Observe actual polarity and connector orientation |
 | Gauge adhesive/protection | Suitable strain-gauge bonding and environmental protection system | Exact product is not established in the repository |
 
-## Source-of-truth note
+## About the generated BOM
 
 `OpenWatts.kicad_pcb` and `fab/pcbway-2026-07-06/` describe the manufactured
 geometry. `production/bom.csv` is a generated engineering export; this document

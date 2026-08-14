@@ -92,6 +92,6 @@ supersede the reproducible RevA KiCad/fabrication files.
 - Revisit ESD, reverse-current/back-power, inrush, and USB power-domain
   protection as a complete system review if a future board is ever authorized.
 
-These notes are deliberately separated from RevA build instructions. Nothing
-here should be copied into the current schematic or PCB without a separately
-approved future-hardware design process.
+These are notes for a possible future board, not changes for RevA. Nothing here
+belongs in the current schematic or PCB unless another revision is actually
+started.

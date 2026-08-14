@@ -1,6 +1,6 @@
 # OpenWatts RevA hardware exports
 
-These files are generated from the authoritative current-board KiCad sources:
+These files are generated from the RevA KiCad schematic and PCB:
 
 - `OpenWatts-RevA-schematic.pdf` - printable schematic
 - `OpenWatts-RevA-schematic.svg` - scalable schematic for browsers/GitHub
