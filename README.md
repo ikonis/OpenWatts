@@ -33,6 +33,7 @@ installed on my bike. It has been calibrated and used with:
 - [BOM](HARDWARE_BOM.md)
 - [schematic and board images](docs/hardware/)
 - [PCBWay manufacturing files](fab/pcbway-2026-07-06/)
+- [final-fit RevA enclosure STEP](mechanical/OpenWatts_RevA_Enclosure.step)
 - [installation checklist](docs/INSTALLATION_CHECKLIST.md)
 - [calibration guide](docs/CALIBRATION.md)
 
