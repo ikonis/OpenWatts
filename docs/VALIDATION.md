@@ -1,7 +1,7 @@
 # Validation status and checklist
 
 The assembled RevA has completed practical calibration and ride validation for
-the 1.1.0 product milestone. Host tests and builds remain contract checks rather
+the 1.1.1 product milestone. Host tests and builds remain contract checks rather
 than substitutes for physical validation after future firmware or hardware
 changes.
 
@@ -60,6 +60,9 @@ diagnostic macro is currently unused.
    OpenWatts -> SmartSpin2K -> MyWhoosh topology.
 6. Verify BLE CPS pairing, signed-safe power, crank event timing, reconnection,
    and sleep after disconnect.
+7. Confirm the single-sided correction once per completed revolution: calibrated
+   left torque is unchanged, while BLE, ride work, MQTT, and road estimates use
+   the doubled estimated total rider power.
 
 ## Ride diagnostics
 

@@ -17,7 +17,8 @@ installed on my bike. It has been calibrated and used with:
 ## Features
 
 - calibrated strain/HX711 torque and IMU cadence
-- filtered BLE Cycling Power output
+- conventional single-sided total-power estimate: calibrated left-crank power
+  doubled once for BLE Cycling Power, ride summaries, and road estimates
 - Normal and Maintenance operating modes
 - motion wake and battery-conscious light sleep
 - guided Bench Calibration plus runtime Ride Zero
@@ -55,6 +56,9 @@ setup, calibration, architecture, Home Assistant, and test notes.
   useful number when accuracy matters.
 - MQTT uses unauthenticated plain TCP on a trusted LAN.
 - Road speed and distance are modeled estimates, not wheel/GPS measurements.
+- OpenWatts measures left-crank torque only. It assumes approximately equal
+  left/right contribution when estimating total cycling power; cadence itself
+  is measured directly and is never doubled.
 
 ## License
 

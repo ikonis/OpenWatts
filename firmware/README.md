@@ -1,6 +1,6 @@
 # OpenWatts firmware
 
-Firmware 1.1.0 is the first post-installation product milestone. The assembled
+Firmware 1.1.1 is the first post-installation product milestone. The assembled
 RevA has completed calibration, BLE/SmartSpin2K riding, cadence, ride-history,
 battery, sleep/wake, WebUI, OTA, MQTT, and Home Assistant field validation.
 
@@ -28,17 +28,26 @@ The mode applies immediately and persists across reboot.
 
 - Cadence is derived from completed forward IMU rotations and published through
   BLE CPS crank-revolution data.
-- Torque comes from the calibrated HX711 bridge. Bench Calibration owns the
-  permanent scale; Manual Tare and Automatic Ride Zero only change runtime zero.
+- Torque comes from the calibrated HX711 bridge on the **left crank**. Bench
+  Calibration owns the permanent left-crank scale; Manual Tare and Automatic
+  Ride Zero only change runtime zero.
 - Power uses the authoritative cadence/torque pipeline, invalid-sample rejection,
-  completed-revolution integration, median filtering, and a lightweight EMA.
+  completed-revolution integration, and then doubles measured left-side power to
+  estimate total rider power before median filtering and a lightweight EMA.
+  This is the conventional single-sided-meter assumption of approximately equal
+  left/right contribution. A real leg imbalance creates the same estimation
+  error found in commercial single-sided meters.
+- HX711 counts, zero offsets, calibration scale, and displayed torque remain
+  actual left-crank measurements. Cadence is measured directly and is never
+  doubled.
 - A qualified completed ride is retained in NVS with power, cadence, work,
   revolutions, and reproducible road-model context.
 - A completed ride is marked MQTT-pending. When ordinary Normal Mode sleep is
   due, firmware makes one bounded QoS 1 report attempt, then sleeps regardless
   of network success. Failed reports remain pending for a later opportunity.
 
-Road estimates use SI internally. Model version 1 applies 97% drivetrain
+Road estimates use the corrected total cycling-power value and SI internally.
+Model version 1 applies 97% drivetrain
 efficiency and solves flat-road rolling plus aerodynamic resistance. The WebUI
 defaults to Imperial presentation; MQTT remains SI-native for Home Assistant.
 

@@ -4,7 +4,7 @@ OpenWatts is a standalone ESP32-C3/LSM6DS3/HX711 cycling power meter. The RevA
 PCB is assembled and fixed; firmware must follow `firmware/src/board.h` and must
 not assume hardware changes.
 
-Firmware 1.1.0 is the working-product baseline. Further work is feature work or
+Firmware 1.1.1 is the working-product baseline. Further work is feature work or
 targeted corrective maintenance; a RevB is not currently planned.
 
 ## Product policy
@@ -14,7 +14,10 @@ targeted corrective maintenance; a RevB is not currently planned.
 - BLE Cycling Power is the riding interface.
 - Bench Calibration establishes permanent scale and direction.
 - Manual Tare and Automatic Ride Zero adjust only the in-service zero.
-- IMU cadence and HX711 torque feed one authoritative power pipeline.
+- IMU cadence and left-crank HX711 torque feed one authoritative power pipeline.
+  The completed left-side work estimate is doubled once to produce conventional
+  estimated total rider power for BLE, rides, MQTT, and road estimates. Raw
+  strain and torque diagnostics remain left-side measurements.
 - The most recent qualified ride is retained with reproducible road-model data.
 - MQTT is low-rate reporting and Home Assistant integration, not live power
   transport.

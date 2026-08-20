@@ -14,8 +14,11 @@ installed RevA direction is negative gyro Z. The active estimator:
 Crank position is relative; starting at a particular angle is never required.
 A wake interrupt signals motion only and cannot itself create a revolution.
 
-Power is integrated from non-negative calibrated torque across each completed
-forward revolution, then passed through the output filter. Crank-angle sector
-weighting is intentionally disabled because the product has no absolute angle
-reference. Maintenance diagnostics expose enough gyro/integration evidence to
-investigate field cadence problems without changing production output.
+Power is integrated from non-negative calibrated **left-crank** torque across
+each completed forward revolution. The measured-side watts are doubled once to
+produce the conventional single-sided estimate of total rider power, then
+passed through the output filter. Crank-angle sector weighting is intentionally
+disabled because the product has no absolute angle reference. The multiplier
+does not affect torque, calibration, cadence, or revolution data. Maintenance
+diagnostics expose enough gyro/integration evidence to investigate field
+cadence problems without changing production output.

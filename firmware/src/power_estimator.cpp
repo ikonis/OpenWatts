@@ -97,19 +97,20 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
         return latest_;
     }
     const float duration_seconds = static_cast<float>(cadence.revolution_duration_us) / 1000000.0F;
-    const float watts = std::max(0.0F, revolution_work_joules_ / duration_seconds);
+    const float measured_left_watts = std::max(0.0F, revolution_work_joules_ / duration_seconds);
     revolution_work_joules_ = 0.0F;
     revolution_angle_radians_ = 0.0F;
-    if (!std::isfinite(watts)) {
+    const float estimated_total_watts = measured_left_watts * kSingleSidedPowerMultiplier;
+    if (!std::isfinite(estimated_total_watts)) {
         reject(PowerRejectionReason::NonFinitePower);
         return latest_;
     }
-    if (watts > static_cast<float>(config_.maximum_valid_power_watts)) {
+    if (estimated_total_watts > static_cast<float>(config_.maximum_valid_power_watts)) {
         reject(PowerRejectionReason::AboveMaximum);
         return latest_;
     }
 
-    median_window_[median_index_] = watts;
+    median_window_[median_index_] = estimated_total_watts;
     median_index_ = (median_index_ + 1U) % 5U;
     if (median_count_ < 5U) ++median_count_;
     const float robust = median(median_window_, median_count_);

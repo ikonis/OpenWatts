@@ -7,12 +7,19 @@
 
 namespace openwatts {
 
+// RevA measures strain on the left crank only.  Cycling applications expect
+// total rider power, so this converts the measured-side result using the
+// conventional single-sided estimate.  It is intentionally not configurable.
+constexpr float kSingleSidedPowerMultiplier = 2.0F;
+
 struct PowerSample {
     int32_t raw_counts = 0;
     float filtered_counts = 0.0F;
     float noise_estimate = 0.0F;
     float torque_nm = 0.0F;
     float cadence_rpm = 0.0F;
+    // Estimated total rider cycling power in watts.  Raw HX711 data and
+    // torque_nm remain left-crank measurements.
     int16_t power_watts = 0;
     uint16_t cumulative_crank_revolutions = 0;
     uint16_t last_crank_event_time = 0;
