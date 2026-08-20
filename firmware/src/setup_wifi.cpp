@@ -374,7 +374,7 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    "\"unit_system\":\"%s\",\"rider_mass_kg\":%.2f,"
                    "\"imu_wake_threshold\":%u,\"imu_revolution_threshold_dps\":%.1f,"
                    "\"minimum_cadence_rpm\":%u,\"maximum_cadence_rpm\":%u,"
-                   "\"rotation_aware_power_enabled\":%s,\"ble_advertising_power_dbm\":%d,"
+                   "\"ble_advertising_power_dbm\":%d,"
                    "\"zero_offset\":%ld,\"calibration_zero\":%ld,"
                    "\"counts_per_nm\":%.3f,\"torque_sign\":%ld,\"calibration_mass_kg\":%.4f,"
                    "\"calibration_lever_arm_mm\":%.2f}}",
@@ -456,7 +456,6 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    static_cast<unsigned>(c.imu_wake_threshold),
                    static_cast<double>(c.imu_revolution_threshold_dps),
                    static_cast<unsigned>(c.minimum_cadence_rpm), static_cast<unsigned>(c.maximum_cadence_rpm),
-                   c.rotation_aware_power_enabled ? "true" : "false",
                    static_cast<int>(c.ble_advertising_power_dbm),
                    static_cast<long>(c.runtime_zero_offset_counts),
                    static_cast<long>(c.calibration_zero_reference_counts), static_cast<double>(c.counts_per_nm),
@@ -465,11 +464,6 @@ esp_err_t statusHandler(httpd_req_t *req) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, g_status_json, HTTPD_RESP_USE_STRLEN);
-}
-
-esp_err_t selfTestHandler(httpd_req_t *req) {
-    httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_send(req, "Self-test runs at boot; read serial log or BLE diagnostics characteristic.", HTTPD_RESP_USE_STRLEN);
 }
 
 esp_err_t calibrationHandler(httpd_req_t *req) {
@@ -1029,7 +1023,6 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t save{.uri = "/save", .method = HTTP_POST, .handler = saveHandler, .user_ctx = nullptr};
     httpd_uri_t operating_mode{.uri = "/api/operating-mode", .method = HTTP_POST, .handler = operatingModeHandler, .user_ctx = nullptr};
     httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
-    httpd_uri_t selftest{.uri = "/selftest", .method = HTTP_GET, .handler = selfTestHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
     httpd_uri_t ride_page{.uri = "/ride", .method = HTTP_GET, .handler = ridePageHandler, .user_ctx = nullptr};
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
@@ -1057,7 +1050,6 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &operating_mode), kTag, "operating mode handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &selftest), kTag, "selftest handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_page), kTag, "ride page handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");

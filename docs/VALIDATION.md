@@ -64,6 +64,26 @@ diagnostic macro is currently unused.
    left torque is unchanged, while BLE, ride work, MQTT, and road estimates use
    the doubled estimated total rider power.
 
+## Short ride regression check
+
+After calibration, mounting, sensor, BLE, or cadence changes, complete one
+short controlled ride and compare it with a trusted reference where available.
+
+- Confirm BLE pairing/reconnection and Cycling Power compatibility.
+- Compare cadence at steady 60 and 90 RPM.
+- Watch for false revolutions while stationary, vibration sensitivity, torque
+  return-to-zero, and drift.
+- Confirm power remains bounded and non-negative through start/stop and filter
+  reacquisition.
+- Confirm BLE disconnect, inactivity sleep, motion wake, and post-ride Last
+  Ride persistence/reporting.
+
+Ride history starts only from calibrated, valid samples. Cadence must remain
+active for ten seconds before a candidate begins, accumulate the configured
+minimum moving duration to qualify, and remain zero for five minutes to finish.
+Compare the saved Last Ride with SmartSpin2K/MyWhoosh as a practical regression
+check.
+
 ## Ride diagnostics
 
 The current Ride Diagnostics setting adds one periodic serial log line containing

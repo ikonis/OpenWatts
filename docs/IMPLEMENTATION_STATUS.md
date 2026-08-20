@@ -1,6 +1,6 @@
-# OpenWatts implementation status
+# OpenWatts current product status
 
-This is the production-source audit for firmware 1.1.0. The two PlatformIO
+This is the production-source audit for firmware 1.1.1. The two PlatformIO
 targets are `esp32c3` and `esp32c3_diagnostic`; persisted `DeviceConfig` schema
 is 13 and Last Ride schema is 3.
 
@@ -11,7 +11,7 @@ is 13 and Last Ride schema is 3.
 | Operating Mode | Normal and Maintenance apply immediately and persist. |
 | BLE CPS | Configurable identity/radio power, signed-safe power, crank revolution and event-time data, delivery/failure counters. |
 | Cadence | Stationary-bias-corrected forward gyro-Z integration, complete-revolution counting, reverse rejection, cadence range and stale-time validation. |
-| Torque/power | HX711 signed conversion, readiness/failures/noise, Bench Calibration, Manual Tare, Automatic Ride Zero, sample validation, revolution work integration, median/EMA output filtering. |
+| Torque/power | HX711 signed conversion, readiness/failures/noise, Bench Calibration, Manual Tare, Automatic Ride Zero, sample validation, revolution work integration, then one conventional single-sided 2x estimate before median/EMA output filtering. |
 | Ride history | Calibration-gated detection, one retained Last Ride, power/cadence/work/revolutions, versioned road distance/speed context, durable post-ride MQTT intent. |
 | Sleep/wake | Normal inactivity light sleep with IMU, USB and timer wake; direct timer battery decision; Maintenance intentionally remains awake. |
 | Reporting | Voltage-first battery policy, retained QoS 1 MQTT, Home Assistant discovery, bounded pre-sleep Last Ride report and retry persistence. |
@@ -31,15 +31,16 @@ is 13 and Last Ride schema is 3.
   crank mechanics, not firmware alone.
 - SmartSpin2K dashboard fields are browser-side, read-only LAN data and do not
   alter the working BLE topology.
-- The diagnostic target currently preserves product behavior and provides a
-  compile marker for controlled future instrumentation.
+- The diagnostic target currently preserves product behavior; it exists for
+  controlled future instrumentation rather than a separate device mode.
 
 ## NVS compatibility retained intentionally
 
 `DeviceConfig` is an append-only binary blob. Historical deep-sleep, button,
-Wi-Fi, BLE-advertising and IMU-session slots remain reserved at their deployed
-offsets. They are not controls and are not executed. Removing or reordering
-them would risk existing Wi-Fi credentials and calibration.
+Wi-Fi, BLE-advertising, notification, report-policy, angle-weighting, and
+IMU-session slots remain reserved at their deployed offsets. They are not
+controls and are not executed. Removing or reordering them would risk existing
+Wi-Fi credentials and calibration.
 
 Last Ride schemas 1 and 2 migrate explicitly. Schema 3 adds durable MQTT
 pending state. A schema-2 ride migrates as already published to avoid an

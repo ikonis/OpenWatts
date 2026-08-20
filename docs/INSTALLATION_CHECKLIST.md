@@ -14,5 +14,6 @@
     ride.
 11. Return to Normal Mode when maintenance is finished.
 
-The Diagnostics page contains a shorter checklist. Use `VALIDATION.md` for the
-actual acceptance criteria and `IMPLEMENTATION_STATUS.md` for known gaps.
+The Diagnostics page contains a shorter checklist. Use `VALIDATION.md` for
+acceptance criteria and `IMPLEMENTATION_STATUS.md` for the current product
+boundary.

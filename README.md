@@ -45,8 +45,9 @@ ever make another revision.
 ## Firmware
 
 Firmware source and build instructions are in
-[firmware/README.md](firmware/README.md). The [`docs/`](docs/) folder has the
-setup, calibration, architecture, Home Assistant, and test notes.
+[firmware/README.md](firmware/README.md). Start with the
+[documentation index](docs/README.md) for setup, calibration, architecture,
+Home Assistant, and validation notes.
 
 ## Notes
 

@@ -94,18 +94,12 @@ DeviceConfig sanitized(DeviceConfig config) {
     config.imu_wake_threshold = std::min<uint8_t>(config.imu_wake_threshold, 0x3F);
     config.imu_wake_duration = std::min<uint8_t>(config.imu_wake_duration, 3);
     config.mqtt_port = config.mqtt_port == 0 ? 1883 : config.mqtt_port;
-    config.mqtt_charge_soon_percent = std::min<uint8_t>(config.mqtt_charge_soon_percent, 100);
-    config.mqtt_charge_now_percent =
-        std::min(config.mqtt_charge_now_percent, config.mqtt_charge_soon_percent);
-    config.mqtt_critical_percent =
-        std::min(config.mqtt_critical_percent, config.mqtt_charge_now_percent);
     config.battery_voltage_scale = std::clamp(config.battery_voltage_scale, 0.1F, 10.0F);
     config.battery_qualification_count = std::clamp<uint8_t>(config.battery_qualification_count, 1, 8);
     config.battery_check_interval_seconds = std::clamp<uint32_t>(config.battery_check_interval_seconds, 60, 86400);
     config.battery_heartbeat_interval_seconds =
         std::clamp<uint32_t>(config.battery_heartbeat_interval_seconds, 300, 604800);
     config.battery_report_voltage_delta = std::clamp(config.battery_report_voltage_delta, 0.005F, 0.25F);
-    config.usb_voltage_publish_delta = std::clamp(config.usb_voltage_publish_delta, 0.005F, 0.25F);
     config.battery_report_retry_interval_seconds =
         std::clamp<uint32_t>(config.battery_report_retry_interval_seconds, 60, 86400);
     config.maximum_valid_power_watts = std::clamp<uint16_t>(config.maximum_valid_power_watts, 500, 5000);

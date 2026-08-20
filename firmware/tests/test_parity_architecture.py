@@ -109,7 +109,7 @@ class ParityArchitectureTests(unittest.TestCase):
 
     def test_rotation_power_is_disabled_by_default(self):
         text = (SRC / "config.h").read_text()
-        self.assertIn("rotation_aware_power_enabled = false", text)
+        self.assertIn("reserved_rotation_aware_power_enabled = false", text)
 
     def test_nvs_migration_preserves_prefix(self):
         text = (SRC / "settings_storage.cpp").read_text()

@@ -8,8 +8,6 @@ namespace openwatts {
 
 class Hx711;
 class Lsm6ds3;
-class BleCyclingPowerService;
-
 struct SelfTestResult {
     bool imu_detected = false;
     uint8_t imu_who_am_i = 0;

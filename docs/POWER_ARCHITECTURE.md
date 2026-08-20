@@ -27,9 +27,8 @@ The active voltage thresholds are:
 - Protection: at or below 3.20 V
 - Invalid: outside the accepted measurement/classification range
 
-A transition needs two matching observations by default. The stored
-`battery_hysteresis_voltage` value is **not currently used**; qualification is
-count-based only.
+A transition needs two matching observations by default. Qualification is
+count-based rather than hysteresis-based.
 
 ## Report decisions
 
@@ -43,14 +42,10 @@ Normal report policy publishes after:
 - USB insertion/removal observed while awake.
 
 Report history is held in RAM and resets on reboot. The retained MQTT message
-survives at the broker, but firmware scheduling history does not.
-
-The stored `usb_voltage_publish_delta` (default 0.01 V) is not connected to
-report policy; both USB and battery policy currently use the 0.02 V report
-delta unless Maintenance forces its fixed service cadence.
-
-The stored percentage notification thresholds are also unused. State and
-report logic are voltage-based.
+survives at the broker, but firmware scheduling history does not. Both USB and
+battery use the 0.02 V report delta unless Maintenance Mode applies its fixed
+service cadence. State and report logic are voltage-based; estimated percentage
+is display metadata only.
 
 ## Sleep and wake
 

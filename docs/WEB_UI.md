@@ -1,6 +1,6 @@
 # Web Interface
 
-Firmware 1.1.0 presents one consistent responsive product interface across
+Firmware 1.1.1 presents one consistent responsive product interface across
 desktop and mobile. The OpenWatts logo returns to Status and the shared header
 contains Status, Ride, Settings, Calibration, OTA Update, and Diagnostics.
 

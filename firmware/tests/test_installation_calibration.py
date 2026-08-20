@@ -56,7 +56,7 @@ class CalibrationArchitectureTests(unittest.TestCase):
 
     def test_unvalidated_rotation_remains_disabled(self):
         config = (SRC / "config.h").read_text()
-        self.assertIn("rotation_aware_power_enabled = false", config)
+        self.assertIn("reserved_rotation_aware_power_enabled = false", config)
         ui = (SRC / "web_ui.cpp").read_text()
         self.assertNotIn("Rotation-aware power", ui)
         self.assertNotIn("id=rotationAware", ui)

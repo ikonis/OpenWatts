@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <cstring>
 
 #include "operating_mode.h"
 
@@ -44,9 +43,11 @@ struct DeviceConfig {
     char mqtt_host[64]{};
     uint16_t mqtt_port = 1883;
     char mqtt_topic[96] = "openwatts/battery";
-    uint8_t mqtt_charge_soon_percent = 20;
-    uint8_t mqtt_charge_now_percent = 10;
-    uint8_t mqtt_critical_percent = 5;
+    // Retained only to preserve the v1-v9 binary layout. Battery policy has
+    // been voltage-based since the production runtime was introduced.
+    uint8_t reserved_legacy_mqtt_charge_soon_percent = 20;
+    uint8_t reserved_legacy_mqtt_charge_now_percent = 10;
+    uint8_t reserved_legacy_mqtt_critical_percent = 5;
     char wifi_ssid[33]{};
     char wifi_password[65]{};
 
@@ -62,19 +63,21 @@ struct DeviceConfig {
     float battery_charge_now_voltage = 3.50F;
     float battery_critical_voltage = 3.35F;
     float battery_protection_voltage = 3.20F;
-    float battery_hysteresis_voltage = 0.05F;
+    // Qualification is count-based; this historical slot is no longer read.
+    float reserved_legacy_battery_hysteresis_voltage = 0.05F;
     uint8_t battery_qualification_count = 2;
     uint32_t battery_check_interval_seconds = 300;
     uint32_t battery_heartbeat_interval_seconds = 86400;
     float battery_report_voltage_delta = 0.02F;
-    float usb_voltage_publish_delta = 0.01F;
+    // USB and battery reporting share battery_report_voltage_delta.
+    float reserved_legacy_usb_voltage_publish_delta = 0.01F;
     uint32_t battery_report_retry_interval_seconds = 900;
     uint16_t maximum_valid_power_watts = 2000;
     float power_filter_alpha = 0.35F;
     bool ride_diagnostics_enabled = false;
-    // Reserved product setting. Production power currently uses completed
-    // IMU revolutions without crank-angle weighting.
-    bool rotation_aware_power_enabled = false;
+    // Reserved product setting. Production power uses completed IMU
+    // revolutions without crank-angle weighting.
+    bool reserved_rotation_aware_power_enabled = false;
 
     // Append-only storage preserves all deployed field offsets.
     bool debug_logging_enabled = false;

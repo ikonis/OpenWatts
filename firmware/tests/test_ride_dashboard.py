@@ -54,6 +54,14 @@ class RideDashboardTests(unittest.TestCase):
         self.assertIn("finishForUsbConnection", self.main)
         self.assertIn('finish(now_us, "usb_connected")', self.ride_log)
 
+    def test_secondary_resistance_row_has_no_empty_target_slot(self):
+        ride_page = self.web.split("const char kRidePage[]", 1)[1].split(
+            "const char kSettingsPage[]", 1
+        )[0]
+        self.assertIn(".ridesecondary{grid-template-columns:repeat(2,minmax(0,1fr))", ride_page)
+        self.assertIn(".ridesecondary .modecell{grid-column:1/-1", ride_page)
+        self.assertNotIn("Target resistance", ride_page)
+
 
 if __name__ == "__main__":
     unittest.main()
