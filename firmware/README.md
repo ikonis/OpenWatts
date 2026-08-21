@@ -1,6 +1,6 @@
 # OpenWatts firmware
 
-Firmware 1.1.1 is the first post-installation product milestone. The assembled
+Firmware 1.2.0 adds the SmartSpin2K Trainer Test tool to the assembled
 RevA has completed calibration, BLE/SmartSpin2K riding, cadence, ride-history,
 battery, sleep/wake, WebUI, OTA, MQTT, and Home Assistant field validation.
 

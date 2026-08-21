@@ -22,7 +22,7 @@ class RideDashboardTests(unittest.TestCase):
     def test_browser_reads_only_ss2k_runtime_snapshot(self):
         self.assertIn("http://smartspin2k.local/runtimeConfigJSON", self.web)
         ride_page = self.web.split("const char kRidePage[]", 1)[1].split(
-            "const char kSettingsPage[]", 1
+            "const char kTrainerTestPage[]", 1
         )[0]
         self.assertNotIn("configJSON", ride_page)
         self.assertIn("Promise.allSettled", ride_page)
@@ -42,7 +42,7 @@ class RideDashboardTests(unittest.TestCase):
     def test_normal_ride_wifi_is_bounded_and_non_retrying(self):
         self.assertIn("bool ride_wifi_latched = false", self.main)
         self.assertIn("bool ride_wifi_start_attempted = false", self.main)
-        self.assertIn("if (g_ride_log.candidate() && !ride_wifi_latched)", self.main)
+        self.assertIn("g_ride_log.candidate() && !ride_wifi_latched", self.main)
         self.assertIn("!g_setup_wifi.active() && !ride_wifi_start_attempted", self.main)
         self.assertIn("ride_wifi_latched = false", self.main)
         self.assertIn("ride_wifi_start_attempted = false", self.main)
@@ -56,7 +56,7 @@ class RideDashboardTests(unittest.TestCase):
 
     def test_secondary_resistance_row_has_no_empty_target_slot(self):
         ride_page = self.web.split("const char kRidePage[]", 1)[1].split(
-            "const char kSettingsPage[]", 1
+            "const char kTrainerTestPage[]", 1
         )[0]
         self.assertIn(".ridesecondary{grid-template-columns:repeat(2,minmax(0,1fr))", ride_page)
         self.assertIn(".ridesecondary .modecell{grid-column:1/-1", ride_page)

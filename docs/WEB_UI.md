@@ -1,14 +1,18 @@
 # Web Interface
 
-Firmware 1.1.1 presents one consistent responsive product interface across
+Firmware 1.2.0 presents one consistent responsive product interface across
 desktop and mobile. The OpenWatts logo returns to Status and the shared header
-contains Status, Ride, Settings, Calibration, OTA Update, and Diagnostics.
+contains Status, Ride, Trainer Test, Settings, Calibration, OTA Update, and
+Diagnostics.
 
 - Status: ordinary device, battery, connection and readiness information.
 - Settings: authoritative NVS-backed controls; unsafe items remain disabled.
 - Calibration: strain assessment, staged Bench Calibration, Manual Tare,
   direction reversal, verification and confirmed reset.
 - OTA Update: binary upload and automatic reboot on USB, or in Maintenance Mode with a valid battery at or above 3.75 V.
+- Trainer Test: browser-side SmartSpin2K brake/ERG characterization. It is
+  deliberate, phone-first, and temporarily suppresses Last Ride recording so a
+  test cannot replace normal ride history. See [Trainer Test](TRAINER_TEST.md).
 - Diagnostics: installation evidence, continuous Maintenance-mode IMU tuning,
   raw sensor data, and checklist.
 

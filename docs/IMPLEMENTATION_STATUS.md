@@ -1,6 +1,6 @@
 # OpenWatts current product status
 
-This is the production-source audit for firmware 1.1.1. The two PlatformIO
+This is the production-source audit for firmware 1.2.0. The two PlatformIO
 targets are `esp32c3` and `esp32c3_diagnostic`; persisted `DeviceConfig` schema
 is 13 and Last Ride schema is 3.
 
@@ -15,7 +15,7 @@ is 13 and Last Ride schema is 3.
 | Ride history | Calibration-gated detection, one retained Last Ride, power/cadence/work/revolutions, versioned road distance/speed context, durable post-ride MQTT intent. |
 | Sleep/wake | Normal inactivity light sleep with IMU, USB and timer wake; direct timer battery decision; Maintenance intentionally remains awake. |
 | Reporting | Voltage-first battery policy, retained QoS 1 MQTT, Home Assistant discovery, bounded pre-sleep Last Ride report and retry persistence. |
-| Wi-Fi/WebUI | Station mode, recovery AP/wildcard DNS, responsive Status/Ride/Settings/Calibration/OTA/Diagnostics pages and SmartSpin2K live dashboard. |
+| Wi-Fi/WebUI | Station mode, recovery AP/wildcard DNS, responsive Status/Ride/Trainer Test/Settings/Calibration/OTA/Diagnostics pages and SmartSpin2K live dashboard. |
 | OTA | Image/size/partition validation and reboot; USB or qualified Maintenance battery power. |
 | Configuration | One append-only NVS config with centralized sanitization and explicit Last Ride migration. |
 | LED | Product boot, advertising, connected, maintenance, OTA, calibration-required and fatal patterns. |
@@ -31,6 +31,9 @@ is 13 and Last Ride schema is 3.
   crank mechanics, not firmware alone.
 - SmartSpin2K dashboard fields are browser-side, read-only LAN data and do not
   alter the working BLE topology.
+- Trainer Test uses only SmartSpin2K's own public WebUI endpoints after explicit
+  confirmation. Its volatile lease pauses Last Ride recording and expires after
+  ten minutes; it is not a normal ride-control feature.
 - The diagnostic target currently preserves product behavior; it exists for
   controlled future instrumentation rather than a separate device mode.
 

@@ -529,7 +529,10 @@ extern "C" void app_main() {
                 stationary_zero_attempted = false;
             }
         }
-        if (g_config.ride_detection_enabled && g_config.strain_calibration_valid) {
+        // Trainer Test is an explicitly leased, browser-driven experiment.
+        // Do not let test pedaling create, finish, or overwrite a Last Ride.
+        if (g_config.ride_detection_enabled && g_config.strain_calibration_valid &&
+            !g_setup_wifi.trainerTestActive()) {
             bool ride_completed = false;
             if (usb_ride_finalize_pending && !cadence.moving) {
                 ride_completed = g_ride_log.finishForUsbConnection(now_us);
@@ -553,7 +556,7 @@ extern "C" void app_main() {
                 else ESP_LOGW(kTag, "last ride save failed: %s", esp_err_to_name(ride_err));
             }
         }
-        if (g_ride_log.candidate() && !ride_wifi_latched) {
+        if (!g_setup_wifi.trainerTestActive() && g_ride_log.candidate() && !ride_wifi_latched) {
             ride_wifi_latched = true;
             if (!g_setup_wifi.active() && !ride_wifi_start_attempted && g_config.hasWifiCredentials()) {
                 ride_wifi_start_attempted = true;

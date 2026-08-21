@@ -318,6 +318,39 @@ esp_err_t ridePageHandler(httpd_req_t *req) {
     return sendPage(req, webui::kRidePage);
 }
 
+std::string requestBody(httpd_req_t *req);
+
+esp_err_t trainerTestPageHandler(httpd_req_t *req) {
+    return sendPage(req, webui::kTrainerTestPage);
+}
+
+esp_err_t trainerTestLeaseHandler(httpd_req_t *req) {
+    if (g_portal == nullptr || g_portal->mutableConfig() == nullptr) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
+    }
+    const std::string body = requestBody(req);
+    const std::string active = formValue(body, "active");
+    if (active != "0" && active != "1") {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "active must be 0 or 1");
+    }
+    if (active == "1") {
+        const LiveStatus status = g_portal->liveStatus();
+        const bool power_permitted = status.usb_present ||
+            OperatingPolicy::isMaintenance(*g_portal->mutableConfig());
+        if (!power_permitted || !status.strain_calibration_valid || status.ride_active || status.ride_candidate) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                       "Trainer Test requires USB or Maintenance, calibration, and no active ride");
+        }
+        g_portal->setTrainerTestActive(true);
+    } else {
+        g_portal->setTrainerTestActive(false);
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, active == "1"
+        ? "{\"ok\":true,\"active\":true,\"message\":\"Trainer Test active; normal ride recording paused\"}"
+        : "{\"ok\":true,\"active\":false,\"message\":\"Trainer Test ended\"}");
+}
+
 esp_err_t statusHandler(httpd_req_t *req) {
     if (g_portal == nullptr) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
     const LiveStatus s = g_portal->liveStatus();
@@ -1007,6 +1040,13 @@ void SetupWifi::resetImuTracker() { imu_tracker_reset_requested_.store(true); }
 bool SetupWifi::consumeImuTrackerReset() { return imu_tracker_reset_requested_.exchange(false); }
 void SetupWifi::setBridgeSignalConfirmed(bool confirmed) { bridge_signal_confirmed_.store(confirmed && config_ && OperatingPolicy::permitsMaintenanceTools(*config_)); }
 bool SetupWifi::bridgeSignalConfirmed() const { return bridge_signal_confirmed_.load() && config_ && OperatingPolicy::permitsMaintenanceTools(*config_); }
+void SetupWifi::setTrainerTestActive(bool active) {
+    constexpr int64_t kTrainerTestLeaseUs = 10LL * 60LL * 1000000LL;
+    trainer_test_until_us_.store(active ? esp_timer_get_time() + kTrainerTestLeaseUs : 0);
+}
+bool SetupWifi::trainerTestActive() const {
+    return trainer_test_until_us_.load() > esp_timer_get_time();
+}
 
 esp_err_t SetupWifi::startHttpServer() {
     if (g_httpd != nullptr) {
@@ -1015,7 +1055,9 @@ esp_err_t SetupWifi::startHttpServer() {
     g_portal = this;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 30;
+    // Keep headroom for product WebUI pages and their small control APIs.
+    // This is a server allocation limit, not a runtime policy setting.
+    cfg.max_uri_handlers = 36;
     ESP_RETURN_ON_ERROR(httpd_start(&g_httpd, &cfg), kTag, "httpd_start");
 
     httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = rootHandler, .user_ctx = nullptr};
@@ -1025,6 +1067,8 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
     httpd_uri_t ride_page{.uri = "/ride", .method = HTTP_GET, .handler = ridePageHandler, .user_ctx = nullptr};
+    httpd_uri_t trainer_test{.uri = "/trainer-test", .method = HTTP_GET, .handler = trainerTestPageHandler, .user_ctx = nullptr};
+    httpd_uri_t trainer_test_lease{.uri = "/api/trainer-test", .method = HTTP_POST, .handler = trainerTestLeaseHandler, .user_ctx = nullptr};
     httpd_uri_t settings{.uri = "/settings", .method = HTTP_GET, .handler = settingsHandler, .user_ctx = nullptr};
     httpd_uri_t diagnostics{.uri = "/diagnostics", .method = HTTP_GET, .handler = diagnosticsHandler, .user_ctx = nullptr};
     httpd_uri_t calibration{.uri = "/calibration", .method = HTTP_GET, .handler = calibrationHandler, .user_ctx = nullptr};
@@ -1052,6 +1096,8 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_page), kTag, "ride page handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &trainer_test), kTag, "trainer test handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &trainer_test_lease), kTag, "trainer test lease handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &settings), kTag, "settings handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &diagnostics), kTag, "diagnostics handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &calibration), kTag, "calibration handler");

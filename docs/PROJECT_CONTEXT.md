@@ -4,7 +4,7 @@ OpenWatts is a standalone ESP32-C3/LSM6DS3/HX711 cycling power meter. The RevA
 PCB is assembled and fixed; firmware must follow `firmware/src/board.h` and must
 not assume hardware changes.
 
-Firmware 1.1.1 is the working-product baseline. Further work is feature work or
+Firmware 1.2.0 is the working-product baseline. Further work is feature work or
 targeted corrective maintenance; a RevB is not currently planned.
 
 ## Product policy

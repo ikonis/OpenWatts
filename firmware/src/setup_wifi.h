@@ -109,6 +109,10 @@ public:
     bool consumeImuTrackerReset();
     void setBridgeSignalConfirmed(bool confirmed);
     bool bridgeSignalConfirmed() const;
+    // Volatile browser-test lease. It intentionally never reaches NVS: a
+    // trainer experiment must not survive a reboot or affect normal rides.
+    void setTrainerTestActive(bool active);
+    bool trainerTestActive() const;
 
 private:
     esp_err_t startHttpServer();
@@ -121,6 +125,7 @@ private:
     std::atomic<bool> config_changed_{false};
     std::atomic<bool> imu_tracker_reset_requested_{false};
     std::atomic<bool> bridge_signal_confirmed_{false};
+    std::atomic<int64_t> trainer_test_until_us_{0};
     CalibrationManager calibration_{};
 };
 

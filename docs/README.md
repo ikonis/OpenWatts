@@ -1,6 +1,6 @@
 # OpenWatts documentation
 
-The documents below describe the assembled OpenWatts RevA and firmware 1.1.1.
+The documents below describe the assembled OpenWatts RevA and firmware 1.2.0.
 They are not a substitute for checking the actual board, harnesses, and crank
 installation before applying power or load.
 
@@ -9,6 +9,7 @@ installation before applying power or load.
 - [Installation checklist](INSTALLATION_CHECKLIST.md)
 - [Calibration](CALIBRATION.md)
 - [Web interface](WEB_UI.md)
+- [SmartSpin2K Trainer Test](TRAINER_TEST.md)
 - [Home Assistant](HOME_ASSISTANT.md)
 
 ## Architecture and validation
