@@ -10,6 +10,7 @@
 namespace openwatts {
 
 class SettingsStorage;
+class PowerEstimator;
 
 // A compact, copyable snapshot owned by the application loop.  The web server
 // only reads this snapshot; it never touches sensor drivers directly.
@@ -91,6 +92,10 @@ public:
     void stop();
     DeviceConfig *mutableConfig();
     SettingsStorage *storage();
+    // Wired once at startup so the sliding-zero diagnostic download route
+    // can read the ride log without copying it into LiveStatus every tick.
+    void setPowerSource(PowerEstimator *power);
+    PowerEstimator *powerSource() const;
     void updateLiveStatus(const LiveStatus &status);
     LiveStatus liveStatus() const;
     bool consumeConfigChanged();
@@ -117,6 +122,7 @@ private:
     bool active_ = false;
     DeviceConfig *config_ = nullptr;
     SettingsStorage *storage_ = nullptr;
+    PowerEstimator *power_ = nullptr;
     LiveStatus live_status_{};
     std::atomic<bool> config_changed_{false};
     std::atomic<bool> imu_tracker_reset_requested_{false};

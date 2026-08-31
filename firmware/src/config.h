@@ -118,6 +118,24 @@ struct DeviceConfig {
     bool imperial_units = true;
     float rider_mass_kg = 82.0F;
 
+    // In-ride sliding zero: tracks the low-torque (dead-center) point of each
+    // pedal revolution so a real, actively-drifting bridge zero can be
+    // corrected while riding, without requiring a stationary crank. Real
+    // pedal effort raises the propulsive peak but should not move the dead
+    // spot; a genuine zero/thermal shift moves the whole waveform including
+    // the dead spot, which is what this tracks. Never touches the permanent
+    // calibration or zero_offset_counts; lives only in RAM and is re-learned
+    // fresh at the start of every ride.
+    bool sliding_zero_enabled = true;
+    // Delay before baseline learning starts after pedaling begins, so it
+    // isn't trained on a trainer's own startup/spin-down handshake.
+    uint16_t sliding_zero_warmup_seconds = 20;
+    uint8_t sliding_zero_baseline_revolutions = 5;
+    uint8_t sliding_zero_window_revolutions = 3;
+    float sliding_zero_deadband_nm = 0.3F;
+    float sliding_zero_correction_fraction = 0.35F;
+    float sliding_zero_max_correction_nm = 15.0F;
+
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';
     }

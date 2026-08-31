@@ -26,6 +26,7 @@
 #include "logo_asset.h"
 #include "led_status.h"
 #include "operating_mode.h"
+#include "power_estimator.h"
 #include "settings_storage.h"
 #include "web_ui.h"
 
@@ -579,6 +580,36 @@ esp_err_t imuCaptureDownloadHandler(httpd_req_t *req) {
     }
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
+
+esp_err_t slidingZeroDownloadHandler(httpd_req_t *req) {
+    PowerEstimator *power = g_portal != nullptr ? g_portal->powerSource() : nullptr;
+    if (power == nullptr) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Power estimator not wired");
+    }
+    const uint32_t count = power->slidingZeroLogCount();
+    if (count == 0) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No sliding-zero samples recorded this ride yet");
+    }
+    httpd_resp_set_type(req, "text/csv; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=openwatts-sliding-zero.csv");
+    ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(
+        req, "elapsed_ms,revolution_min_nm,window_median_nm,baseline_nm,correction_nm,baseline_established\n",
+        HTTPD_RESP_USE_STRLEN), kTag, "send CSV header");
+    char row[128];
+    for (uint32_t i = 0; i < count; ++i) {
+        const SlidingZeroLogEntry e = power->slidingZeroLogEntryAt(i);
+        const int length = std::snprintf(row, sizeof(row), "%u,%.3f,%.3f,%.3f,%.3f,%d\n",
+                                         static_cast<unsigned>(e.elapsed_ms),
+                                         static_cast<double>(e.revolution_min_nm),
+                                         static_cast<double>(e.window_median_nm),
+                                         static_cast<double>(e.baseline_nm),
+                                         static_cast<double>(e.correction_nm),
+                                         e.baseline_established ? 1 : 0);
+        ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, row, length), kTag, "send CSV row");
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 esp_err_t bridgeConfirmHandler(httpd_req_t *req) {
     g_portal->setBridgeSignalConfirmed(formValue(requestBody(req), "confirmed") == "1");
     return actionResponse(req, ESP_OK, g_portal->bridgeSignalConfirmed() ? "Physical signal confirmed" : "Physical confirmation cleared");
@@ -946,6 +977,14 @@ SettingsStorage *SetupWifi::storage() {
     return storage_;
 }
 
+void SetupWifi::setPowerSource(PowerEstimator *power) {
+    power_ = power;
+}
+
+PowerEstimator *SetupWifi::powerSource() const {
+    return power_;
+}
+
 void SetupWifi::updateLiveStatus(const LiveStatus &status) {
     live_status_ = status;
     if (g_imu_capture_active.load()) {
@@ -1052,6 +1091,7 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t imu_capture_status{.uri = "/api/imu-capture/status", .method = HTTP_GET, .handler = imuCaptureStatusHandler, .user_ctx = nullptr};
     httpd_uri_t imu_capture_download{.uri = "/api/imu-capture/download", .method = HTTP_GET, .handler = imuCaptureDownloadHandler, .user_ctx = nullptr};
     httpd_uri_t bridge_confirm{.uri = "/api/calibration/confirm-signal", .method = HTTP_POST, .handler = bridgeConfirmHandler, .user_ctx = nullptr};
+    httpd_uri_t sliding_zero_download{.uri = "/api/sliding-zero/download", .method = HTTP_GET, .handler = slidingZeroDownloadHandler, .user_ctx = nullptr};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &root), kTag, "root handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &logo), kTag, "logo handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
@@ -1080,6 +1120,7 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_status), kTag, "IMU capture status");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_download), kTag, "IMU capture download");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bridge_confirm), kTag, "bridge confirm");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &sliding_zero_download), kTag, "sliding zero download");
     return ESP_OK;
 }
 

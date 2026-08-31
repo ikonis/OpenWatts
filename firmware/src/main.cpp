@@ -247,6 +247,7 @@ void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerS
 
 extern "C" void app_main() {
     ESP_LOGI(kTag, "OpenWatts firmware %s", OPENWATTS_FIRMWARE_VERSION);
+    g_setup_wifi.setPowerSource(&g_power);
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -319,9 +320,12 @@ extern "C" void app_main() {
     // same stable-zero opportunity explicitly after enough fresh HX711 data.
     int64_t usb_inserted_zero_due_us = usb_present ? esp_timer_get_time() + 4000000LL : 0;
     int64_t ble_zero_due_us = 0;
+    // Sliding-zero baseline learning is deliberately deferred past the first
+    // stretch of pedaling: SmartSpin2K's own spin-down/handshake makes early
+    // revolutions unrepresentative of steady-state riding.
+    int64_t sliding_zero_warmup_due_us = 0;
     int64_t last_imu_motion_us = esp_timer_get_time();
     int64_t stationary_since_us = 0;
-    bool stationary_zero_attempted = false;
     bool sleep_report_attempted = false;
     // Normal Mode may bring up the optional dashboard once the existing ride
     // logger qualifies a ride.  This RAM-only latch survives cadence pauses
@@ -421,6 +425,7 @@ extern "C" void app_main() {
                                                           : openwatts::ReportReason::UsbDisconnected;
             if (current_usb_present) {
                 g_ride_zero.resetLifecycle();
+                sliding_zero_warmup_due_us = 0;
                 usb_ride_finalize_pending = g_ride_log.active();
                 ride_wifi_latched = false;
                 ride_wifi_start_attempted = false;
@@ -502,7 +507,10 @@ extern "C" void app_main() {
             // Connecting an app commonly coincides with clipping in or moving
             // the crank. Observe a quiet window before judging Ride Zero.
             ble_zero_due_us = now_us + 3000000LL;
-            if (!ble_connected) g_ride_zero.resetLifecycle();
+            if (!ble_connected) {
+                g_ride_zero.resetLifecycle();
+                sliding_zero_warmup_due_us = 0;
+            }
             previous_ble_connected = ble_connected;
         }
         if (ble_zero_due_us != 0 && now_us >= ble_zero_due_us) {
@@ -511,22 +519,30 @@ extern "C" void app_main() {
                             sample, imu_stationary, now_us);
             ble_zero_due_us = 0;
         }
+        if (sliding_zero_warmup_due_us != 0 && now_us >= sliding_zero_warmup_due_us) {
+            g_power.resetSlidingZero();
+            sliding_zero_warmup_due_us = 0;
+        }
         if (g_config.strain_calibration_valid && cadence.moving) {
+            if (!g_ride_zero.locked()) {
+                // Defer baseline learning past SmartSpin2K's own spin-down/
+                // handshake so it isn't trained on non-steady-state pedaling.
+                sliding_zero_warmup_due_us =
+                    now_us + static_cast<int64_t>(g_config.sliding_zero_warmup_seconds) * 1000000LL;
+            }
             g_ride_zero.lock();
             stationary_since_us = 0;
-            stationary_zero_attempted = false;
         } else if (!cadence.moving) {
             if (stationary_since_us == 0) stationary_since_us = now_us;
             const bool continuous_zero_allowed = current_usb_present ||
                 openwatts::OperatingPolicy::isMaintenance(g_config);
-            if (continuous_zero_allowed && !stationary_zero_attempted && now_us - stationary_since_us >=
+            if (continuous_zero_allowed && now_us - stationary_since_us >=
                     static_cast<int64_t>(g_config.ride_zero_stationary_timeout_seconds) * 1000000LL) {
                 attemptRideZero(openwatts::RideZeroTrigger::Stationary, sample, imu_stationary, now_us);
                 // Continue checking only at the configured interval. This
                 // follows slow unloaded thermal drift without chasing zero
                 // every sample; cadence immediately locks the lifecycle.
                 stationary_since_us = now_us;
-                stationary_zero_attempted = false;
             }
         }
         if (g_config.ride_detection_enabled && g_config.strain_calibration_valid) {
@@ -540,7 +556,10 @@ extern "C" void app_main() {
                 ride_completed = g_ride_log.update(sample, now_us, g_config.minimum_ride_duration_seconds,
                                                    g_config.rider_mass_kg);
             }
-            if (ride_completed) g_ride_zero.resetLifecycle();
+            if (ride_completed) {
+                g_ride_zero.resetLifecycle();
+                sliding_zero_warmup_due_us = 0;
+            }
             if (g_ride_log.completedPendingSave()) {
                 const esp_err_t ride_err = g_settings.saveLastRide(g_ride_log.lastRide());
                 if (ride_err == ESP_OK) {
