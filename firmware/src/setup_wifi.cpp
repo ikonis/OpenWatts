@@ -15,6 +15,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "mdns.h"
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -34,10 +35,12 @@ namespace openwatts {
 namespace {
 constexpr char kTag[] = "setup_wifi";
 constexpr char kSetupSsid[] = "OpenWatts-Setup";
+constexpr char kMdnsHostname[] = "openwatts";
 constexpr uint8_t kEspImageMagic = 0xE9;
 constexpr float kMinimumBatteryOtaVoltage = 3.75F;
 
 bool g_wifi_initialized = false;
+bool g_mdns_initialized = false;
 httpd_handle_t g_httpd = nullptr;
 TaskHandle_t g_dns_task = nullptr;
 SetupWifi *g_portal = nullptr;
@@ -311,6 +314,25 @@ esp_err_t ensureWifiInitialized() {
     return ESP_OK;
 }
 
+// Lets the setup UI and any BLE/Wi-Fi bridge partner reach the device at
+// http://openwatts.local instead of hunting for a DHCP-assigned IP. Re-run on
+// every begin() (not gated on g_wifi_initialized) because stop() tears mDNS
+// down along with the radio each time Wi-Fi is disabled and re-enabled.
+void ensureMdnsStarted() {
+    if (g_mdns_initialized) {
+        return;
+    }
+    const esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(kTag, "mDNS init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    mdns_hostname_set(kMdnsHostname);
+    mdns_instance_name_set("OpenWatts");
+    mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
+    g_mdns_initialized = true;
+}
+
 esp_err_t rootHandler(httpd_req_t *req) {
     return sendPage(req, webui::kStatusPage);
 }
@@ -378,7 +400,8 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    "\"rotation_aware_power_enabled\":%s,\"ble_advertising_power_dbm\":%d,"
                    "\"zero_offset\":%ld,\"calibration_zero\":%ld,"
                    "\"counts_per_nm\":%.3f,\"torque_sign\":%ld,\"calibration_mass_kg\":%.4f,"
-                   "\"calibration_lever_arm_mm\":%.2f}}",
+                   "\"calibration_lever_arm_mm\":%.2f,"
+                   "\"sliding_zero_enabled\":%s,\"sliding_zero_correction_fraction\":%.2f}}",
                   static_cast<unsigned>(s.uptime_seconds), static_cast<double>(s.battery_voltage),
                   static_cast<unsigned>(s.battery_percent), s.battery_valid ? "true" : "false",
                   s.usb_present ? "true" : "false", s.charging ? "true" : "false",
@@ -462,7 +485,9 @@ esp_err_t statusHandler(httpd_req_t *req) {
                    static_cast<long>(c.runtime_zero_offset_counts),
                    static_cast<long>(c.calibration_zero_reference_counts), static_cast<double>(c.counts_per_nm),
                    static_cast<long>(c.torque_sign), static_cast<double>(c.calibration_mass_kg),
-                   static_cast<double>(c.calibration_lever_arm_mm));
+                   static_cast<double>(c.calibration_lever_arm_mm),
+                   c.sliding_zero_enabled ? "true" : "false",
+                   static_cast<double>(c.sliding_zero_correction_fraction));
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, g_status_json, HTTPD_RESP_USE_STRLEN);
@@ -713,6 +738,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
     const std::string advertising_power = formValue(body, "ble_advertising_power_dbm");
     const std::string unit_system = formValue(body, "unit_system");
     const std::string rider_mass = formValue(body, "rider_mass_kg");
+    const std::string sliding_zero_intensity = formValue(body, "sliding_zero_intensity");
 
     if (ssid.size() > 32) return badSetting(req, "Wi-Fi network name is too long");
     if (password.size() > 64) return badSetting(req, "Wi-Fi password is too long");
@@ -767,6 +793,10 @@ esp_err_t saveHandler(httpd_req_t *req) {
         return badSetting(req, "Units must be Imperial or Metric");
     if (!parseFloat(rider_mass, 35.0F, 250.0F, parsed_rider_mass))
         return badSetting(req, "Rider mass must be between 35 and 250 kg");
+    float parsed_sliding_zero_intensity = candidate.sliding_zero_correction_fraction;
+    if (!sliding_zero_intensity.empty() &&
+        !parseFloat(sliding_zero_intensity, 0.05F, 1.0F, parsed_sliding_zero_intensity))
+        return badSetting(req, "Sliding zero intensity must be between 5% and 100%");
     char *power_end = nullptr;
     const long parsed_advertising_power = std::strtol(advertising_power.c_str(), &power_end, 10);
     if (advertising_power.empty() || power_end == advertising_power.c_str() || *power_end != '\0' ||
@@ -814,6 +844,8 @@ esp_err_t saveHandler(httpd_req_t *req) {
     candidate.ble_advertising_power_dbm = static_cast<int8_t>(parsed_advertising_power);
     candidate.imperial_units = unit_system == "imperial";
     candidate.rider_mass_kg = parsed_rider_mass;
+    candidate.sliding_zero_enabled = body.find("sliding_zero_enabled=on") != std::string::npos;
+    candidate.sliding_zero_correction_fraction = parsed_sliding_zero_intensity;
     candidate.force_setup_portal = false;
 
     esp_err_t err = g_portal->storage()->save(candidate);
@@ -936,6 +968,7 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
             ESP_LOGW(kTag, "station connect did not start: %s", esp_err_to_name(connect_err));
         }
     }
+    ensureMdnsStarted();
     ESP_RETURN_ON_ERROR(startHttpServer(), kTag, "http server");
     if (start_setup_ap) {
         ESP_RETURN_ON_ERROR(startDnsRedirect(), kTag, "dns redirect");
@@ -962,6 +995,10 @@ void SetupWifi::stop() {
         if (g_dns_task != nullptr) {
             vTaskDelete(g_dns_task);
             g_dns_task = nullptr;
+        }
+        if (g_mdns_initialized) {
+            mdns_free();
+            g_mdns_initialized = false;
         }
         esp_wifi_stop();
         ESP_LOGI(kTag, "Wi-Fi stopped");
