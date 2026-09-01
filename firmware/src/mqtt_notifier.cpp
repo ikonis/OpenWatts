@@ -129,10 +129,12 @@ void MqttNotifier::eventHandler(void *args, esp_event_base_t, int32_t, void *eve
 void MqttNotifier::onEvent(esp_mqtt_event_handle_t event) {
     if (event == nullptr || client_ == nullptr) return;
     if (event->event_id == MQTT_EVENT_CONNECTED) {
-        if (publish_discovery_) {
-            publishDiscovery(client_, topic_);
-            publish_discovery_ = false;
-        }
+        // The real telemetry publish must go out first and be the only thing
+        // gating success. The discovery burst below is 17 back-to-back QoS-1
+        // publishes handled on this same event context; if it ran first, it
+        // could consume the whole connection watchdog window before the
+        // telemetry publish ever went out, so this record would never
+        // succeed and discovery would be retried -- and lost -- forever.
         const int id = esp_mqtt_client_publish(client_, topic_, payload_, 0, 1, true);
         publish_message_id_.store(id);
         if (id < 0) complete_.store(true);
@@ -140,6 +142,13 @@ void MqttNotifier::onEvent(esp_mqtt_event_handle_t event) {
         succeeded_.store(true);
         complete_.store(true);
         ESP_LOGI(kTag, "battery telemetry published");
+        // Best-effort now that the record that matters is already
+        // acknowledged; a late disconnect here can no longer affect the
+        // reported outcome.
+        if (publish_discovery_) {
+            publishDiscovery(client_, topic_);
+            publish_discovery_ = false;
+        }
     } else if (event->event_id == MQTT_EVENT_ERROR) {
         complete_.store(true);
         ESP_LOGW(kTag, "MQTT transport error");
