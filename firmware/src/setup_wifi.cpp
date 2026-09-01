@@ -79,14 +79,28 @@ void rebootAfterOta(void *) {
     esp_restart();
 }
 
-void scheduleOtaReboot() {
-    esp_timer_create_args_t args{.callback = &rebootAfterOta, .arg = nullptr,
-                                 .dispatch_method = ESP_TIMER_TASK, .name = "ota_reboot",
+void rebootAfterRequest(void *) {
+    ESP_LOGI(kTag, "Manual restart requested; restarting");
+    esp_restart();
+}
+
+void scheduleReboot(esp_timer_cb_t callback) {
+    esp_timer_create_args_t args{.callback = callback, .arg = nullptr,
+                                 .dispatch_method = ESP_TIMER_TASK, .name = "reboot",
                                  .skip_unhandled_events = false};
     esp_timer_handle_t timer = nullptr;
     if (esp_timer_create(&args, &timer) == ESP_OK) {
         esp_timer_start_once(timer, 750000);
     }
+}
+
+void scheduleOtaReboot() { scheduleReboot(&rebootAfterOta); }
+
+esp_err_t restartHandler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/json");
+    const esp_err_t response = httpd_resp_sendstr(req, "{\"ok\":true,\"message\":\"Restarting now.\"}");
+    scheduleReboot(&rebootAfterRequest);
+    return response;
 }
 
 esp_err_t otaUploadHandler(httpd_req_t *req) {
@@ -1139,6 +1153,7 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = rootHandler, .user_ctx = nullptr};
     httpd_uri_t logo{.uri = "/assets/openwatts-logo.svg", .method = HTTP_GET, .handler = logoHandler, .user_ctx = nullptr};
     httpd_uri_t save{.uri = "/save", .method = HTTP_POST, .handler = saveHandler, .user_ctx = nullptr};
+    httpd_uri_t restart{.uri = "/api/restart", .method = HTTP_POST, .handler = restartHandler, .user_ctx = nullptr};
     httpd_uri_t operating_mode{.uri = "/api/operating-mode", .method = HTTP_POST, .handler = operatingModeHandler, .user_ctx = nullptr};
     httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
     httpd_uri_t engineering{.uri = "/api/engineering", .method = HTTP_POST, .handler = engineeringHandler, .user_ctx = nullptr};
@@ -1168,6 +1183,7 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &root), kTag, "root handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &logo), kTag, "logo handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &restart), kTag, "restart handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &operating_mode), kTag, "operating mode handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &engineering), kTag, "engineering handler");
