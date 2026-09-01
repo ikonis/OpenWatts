@@ -39,7 +39,8 @@ esp_err_t CalibrationManager::captureLoaded(int64_t now, bool permitted, bool hx
     state_.result = "capturing_loaded_value"; return ESP_OK;
 }
 esp_err_t CalibrationManager::verify(int64_t now, bool permitted, bool hx) {
-    if (state_.step != CalibrationStep::Saved && state_.step != CalibrationStep::Verified) return ESP_ERR_INVALID_STATE;
+    if (state_.step != CalibrationStep::Review && state_.step != CalibrationStep::Saved &&
+        state_.step != CalibrationStep::Verified) return ESP_ERR_INVALID_STATE;
     state_.verify.clear();
     if (!beginCapture(CalibrationStep::Verifying, now, permitted, hx)) return ESP_ERR_INVALID_STATE;
     state_.result = "verifying_known_load"; return ESP_OK;
@@ -78,7 +79,8 @@ bool CalibrationManager::validateResult() {
     state_.counts_per_nm = 1.0 / std::fabs(state_.nm_per_count); return true;
 }
 esp_err_t CalibrationManager::apply(DeviceConfig &c) {
-    if (state_.step != CalibrationStep::Review || !state_.valid) return ESP_ERR_INVALID_STATE;
+    if ((state_.step != CalibrationStep::Review && state_.step != CalibrationStep::Verified) || !state_.valid)
+        return ESP_ERR_INVALID_STATE;
     c.calibration_zero_reference_counts = static_cast<int32_t>(std::lround(state_.zero.mean));
     c.runtime_zero_offset_counts = c.calibration_zero_reference_counts;
     c.zero_offset_counts = c.runtime_zero_offset_counts;

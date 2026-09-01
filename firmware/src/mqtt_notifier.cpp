@@ -89,6 +89,15 @@ esp_err_t MqttNotifier::begin(const char *host, uint16_t port, const char *topic
     config.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
     config.credentials.client_id = "OpenWatts";
     config.network.timeout_ms = 5000;
+    // This class already implements its own outer retry loop (begin, wait
+    // for complete(), stop, retried on the next evaluation interval).
+    // esp-mqtt's built-in auto-reconnect would run concurrently with that,
+    // retrying internally roughly every 5s without ever necessarily
+    // surfacing a terminal event -- leaving running() true indefinitely and
+    // slowly exhausting sockets shared with the rest of the device. A single
+    // clean attempt per begin() call keeps exactly one retry mechanism in
+    // charge.
+    config.network.disable_auto_reconnect = true;
     config.session.disable_clean_session = false;
     client_ = esp_mqtt_client_init(&config);
     if (client_ == nullptr) return ESP_ERR_NO_MEM;

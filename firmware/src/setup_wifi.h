@@ -112,8 +112,6 @@ public:
     void calibrationDiscard();
     void resetImuTracker();
     bool consumeImuTrackerReset();
-    void setBridgeSignalConfirmed(bool confirmed);
-    bool bridgeSignalConfirmed() const;
 
 private:
     esp_err_t startHttpServer();
@@ -126,7 +124,6 @@ private:
     LiveStatus live_status_{};
     std::atomic<bool> config_changed_{false};
     std::atomic<bool> imu_tracker_reset_requested_{false};
-    std::atomic<bool> bridge_signal_confirmed_{false};
     CalibrationManager calibration_{};
 };
 

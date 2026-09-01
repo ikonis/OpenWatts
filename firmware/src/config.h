@@ -136,6 +136,10 @@ struct DeviceConfig {
     float sliding_zero_correction_fraction = 0.35F;
     float sliding_zero_max_correction_nm = 15.0F;
 
+    // mDNS hostname; the device is reachable at http://<name>.local. Applied
+    // on the next Wi-Fi (re)start.
+    char mdns_hostname[24] = "openwatts";
+
     bool hasWifiCredentials() const {
         return wifi_ssid[0] != '\0';
     }

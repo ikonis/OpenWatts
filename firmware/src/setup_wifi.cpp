@@ -73,6 +73,7 @@ esp_err_t logoHandler(httpd_req_t *req) {
     return httpd_resp_send(req, webui::kLogoSvg, HTTPD_RESP_USE_STRLEN);
 }
 
+
 void rebootAfterOta(void *) {
     ESP_LOGI(kTag, "OTA complete; restarting into updated firmware");
     esp_restart();
@@ -318,7 +319,7 @@ esp_err_t ensureWifiInitialized() {
 // http://openwatts.local instead of hunting for a DHCP-assigned IP. Re-run on
 // every begin() (not gated on g_wifi_initialized) because stop() tears mDNS
 // down along with the radio each time Wi-Fi is disabled and re-enabled.
-void ensureMdnsStarted() {
+void ensureMdnsStarted(const char *hostname) {
     if (g_mdns_initialized) {
         return;
     }
@@ -327,7 +328,7 @@ void ensureMdnsStarted() {
         ESP_LOGW(kTag, "mDNS init failed: %s", esp_err_to_name(err));
         return;
     }
-    mdns_hostname_set(kMdnsHostname);
+    mdns_hostname_set(hostname != nullptr && hostname[0] != '\0' ? hostname : kMdnsHostname);
     mdns_instance_name_set("OpenWatts");
     mdns_service_add(nullptr, "_http", "_tcp", 80, nullptr, 0);
     g_mdns_initialized = true;
@@ -385,7 +386,7 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   "\"mass_kg\":%.4f,\"lever_arm_mm\":%.2f,\"reference_torque_nm\":%.4f,\"raw_delta\":%.2f,"
                   "\"counts_per_nm\":%.4f,\"nm_per_count\":%.9f,\"verification_torque_nm\":%.4f,\"verification_error_percent\":%.2f,"
                   "\"zero_samples\":%u,\"loaded_samples\":%u,\"zero_noise\":%.2f,\"loaded_noise\":%.2f},"
-                   "\"config\":{\"wifi_ssid\":\"%s\",\"operating_mode\":\"%s\","
+                   "\"config\":{\"wifi_ssid\":\"%s\",\"mdns_hostname\":\"%s\",\"operating_mode\":\"%s\","
                    "\"mqtt_enabled\":%s,\"mqtt_host\":\"%s\",\"mqtt_port\":%u,\"mqtt_topic\":\"%s\","
                    "\"light_sleep_enabled\":%s,\"inactivity_timeout_ms\":%u,\"ble_device_name\":\"%s\","
                    "\"ride_diagnostics_enabled\":%s,\"debug_logging_enabled\":%s,"
@@ -463,7 +464,7 @@ esp_err_t statusHandler(httpd_req_t *req) {
                   cal.raw_delta, cal.counts_per_nm, cal.nm_per_count, cal.verification_torque_nm,
                   cal.verification_error_percent, static_cast<unsigned>(cal.zero.count),
                   static_cast<unsigned>(cal.loaded.count), cal.zero.standardDeviation(), cal.loaded.standardDeviation(),
-                   c.wifi_ssid, OperatingPolicy::value(c.operating_mode),
+                   c.wifi_ssid, c.mdns_hostname, OperatingPolicy::value(c.operating_mode),
                    c.mqtt_battery_notifications_enabled ? "true" : "false", c.mqtt_host,
                    static_cast<unsigned>(c.mqtt_port), c.mqtt_topic,
                    c.light_sleep_enabled ? "true" : "false", static_cast<unsigned>(c.inactivity_timeout_ms),
@@ -527,7 +528,6 @@ esp_err_t actionResponse(httpd_req_t *req, esp_err_t err, const char *success) {
 
 esp_err_t calibrationStartHandler(httpd_req_t *req) {
     const std::string body = requestBody(req);
-    if (!g_portal->bridgeSignalConfirmed()) return actionResponse(req, ESP_ERR_INVALID_STATE, "");
     float mass = 0, lever = 0;
     if (!parseFloat(formValue(body, "mass_kg"), .01F, 200.F, mass) ||
         !parseFloat(formValue(body, "lever_mm"), 10.F, 1000.F, lever)) return actionResponse(req, ESP_ERR_INVALID_ARG, "");
@@ -635,11 +635,6 @@ esp_err_t slidingZeroDownloadHandler(httpd_req_t *req) {
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
-esp_err_t bridgeConfirmHandler(httpd_req_t *req) {
-    g_portal->setBridgeSignalConfirmed(formValue(requestBody(req), "confirmed") == "1");
-    return actionResponse(req, ESP_OK, g_portal->bridgeSignalConfirmed() ? "Physical signal confirmed" : "Physical confirmation cleared");
-}
-
 esp_err_t operatingModeHandler(httpd_req_t *req) {
     if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
@@ -701,6 +696,33 @@ esp_err_t rideLoggingHandler(httpd_req_t *req) {
         : "{\"ok\":true,\"ride_logging_enabled\":false,\"message\":\"Last ride recording disabled\"}");
 }
 
+esp_err_t engineeringHandler(httpd_req_t *req) {
+    if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
+    }
+    std::string body;
+    body.resize(static_cast<size_t>(req->content_len));
+    int received = 0;
+    while (received < req->content_len) {
+        const int got = httpd_req_recv(req, body.data() + received, req->content_len - received);
+        if (got <= 0) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "recv failed");
+        received += got;
+    }
+    const std::string ride_diagnostics = formValue(body, "ride_diagnostics");
+    const std::string debug_logging = formValue(body, "debug_logging");
+    if ((ride_diagnostics != "0" && ride_diagnostics != "1") || (debug_logging != "0" && debug_logging != "1")) {
+        return badSetting(req, "Engineering toggles must be 0 or 1");
+    }
+    DeviceConfig candidate = *g_portal->mutableConfig();
+    candidate.ride_diagnostics_enabled = ride_diagnostics == "1";
+    candidate.debug_logging_enabled = debug_logging == "1";
+    const esp_err_t err = g_portal->storage()->save(candidate);
+    if (err != ESP_OK) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, esp_err_to_name(err));
+    *g_portal->mutableConfig() = candidate;
+    g_portal->notifyConfigChanged();
+    return actionResponse(req, ESP_OK, "Engineering settings saved");
+}
+
 esp_err_t saveHandler(httpd_req_t *req) {
     if (g_portal == nullptr || g_portal->mutableConfig() == nullptr || g_portal->storage() == nullptr) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "portal not ready");
@@ -721,6 +743,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
     DeviceConfig candidate = current;
     const std::string ssid = formValue(body, "ssid");
     const std::string password = formValue(body, "password");
+    const std::string mdns_hostname = formValue(body, "mdns_hostname");
     const std::string timeout = formValue(body, "timeout");
     const std::string mqtt_host = formValue(body, "mqtt_host");
     const std::string mqtt_port = formValue(body, "mqtt_port");
@@ -742,6 +765,13 @@ esp_err_t saveHandler(httpd_req_t *req) {
 
     if (ssid.size() > 32) return badSetting(req, "Wi-Fi network name is too long");
     if (password.size() > 64) return badSetting(req, "Wi-Fi password is too long");
+    if (!mdns_hostname.empty()) {
+        if (mdns_hostname.size() > 23 ||
+            !std::all_of(mdns_hostname.begin(), mdns_hostname.end(),
+                         [](unsigned char ch) { return std::isalnum(ch) || ch == '-'; })) {
+            return badSetting(req, "mDNS name must be 1-23 letters, numbers, or hyphens");
+        }
+    }
     if (mqtt_host.size() > 63) return badSetting(req, "MQTT broker address is too long");
     if (mqtt_topic.size() > 95) return badSetting(req, "MQTT topic is too long");
 
@@ -780,7 +810,7 @@ esp_err_t saveHandler(httpd_req_t *req) {
         return badSetting(req, "Minimum ride duration must be between 30 and 3600 seconds");
     if (!parseUnsigned(cadence_timeout, 1, 60, parsed_cadence_timeout))
         return badSetting(req, "Cadence timeout must be between 1 and 60 seconds");
-    if (!parseUnsigned(stationary_timeout, 10, 600, parsed_stationary_timeout))
+    if (!stationary_timeout.empty() && !parseUnsigned(stationary_timeout, 10, 600, parsed_stationary_timeout))
         return badSetting(req, "Ride Zero stationary delay must be between 10 and 600 seconds");
     if (!parseUnsigned(imu_wake_threshold, 1, 63, parsed_wake_threshold))
         return badSetting(req, "Motion sensitivity must be between 1 and 63");
@@ -811,6 +841,10 @@ esp_err_t saveHandler(httpd_req_t *req) {
     }
     candidate.wifi_ssid[sizeof(candidate.wifi_ssid) - 1] = '\0';
     candidate.wifi_password[sizeof(candidate.wifi_password) - 1] = '\0';
+    if (!mdns_hostname.empty()) {
+        std::strncpy(candidate.mdns_hostname, mdns_hostname.c_str(), sizeof(candidate.mdns_hostname) - 1);
+        candidate.mdns_hostname[sizeof(candidate.mdns_hostname) - 1] = '\0';
+    }
     candidate.light_sleep_enabled = body.find("sleep=on") != std::string::npos;
     const std::string operating_mode = formValue(body, "operating_mode");
     if (operating_mode != "normal" && operating_mode != "maintenance") {
@@ -828,8 +862,6 @@ esp_err_t saveHandler(httpd_req_t *req) {
         std::strncpy(candidate.ble_device_name, ble_name.c_str(), sizeof(candidate.ble_device_name) - 1);
         candidate.ble_device_name[sizeof(candidate.ble_device_name) - 1] = '\0';
     }
-    candidate.ride_diagnostics_enabled = body.find("ride_diagnostics=on") != std::string::npos;
-    candidate.debug_logging_enabled = body.find("debug_logging=on") != std::string::npos;
     candidate.auto_ride_zero_enabled = body.find("auto_ride_zero=on") != std::string::npos;
     candidate.ride_detection_enabled = body.find("ride_detection=on") != std::string::npos;
     candidate.power_filter_alpha = parsed_alpha;
@@ -968,7 +1000,7 @@ esp_err_t SetupWifi::begin(DeviceConfig &config, SettingsStorage &storage, bool 
             ESP_LOGW(kTag, "station connect did not start: %s", esp_err_to_name(connect_err));
         }
     }
-    ensureMdnsStarted();
+    ensureMdnsStarted(config.mdns_hostname);
     ESP_RETURN_ON_ERROR(startHttpServer(), kTag, "http server");
     if (start_setup_ap) {
         ESP_RETURN_ON_ERROR(startDnsRedirect(), kTag, "dns redirect");
@@ -1087,8 +1119,6 @@ esp_err_t SetupWifi::calibrationReset() {
 void SetupWifi::calibrationDiscard() { calibration_.discard(); }
 void SetupWifi::resetImuTracker() { imu_tracker_reset_requested_.store(true); }
 bool SetupWifi::consumeImuTrackerReset() { return imu_tracker_reset_requested_.exchange(false); }
-void SetupWifi::setBridgeSignalConfirmed(bool confirmed) { bridge_signal_confirmed_.store(confirmed && config_ && OperatingPolicy::permitsMaintenanceTools(*config_)); }
-bool SetupWifi::bridgeSignalConfirmed() const { return bridge_signal_confirmed_.load() && config_ && OperatingPolicy::permitsMaintenanceTools(*config_); }
 
 esp_err_t SetupWifi::startHttpServer() {
     if (g_httpd != nullptr) {
@@ -1097,7 +1127,7 @@ esp_err_t SetupWifi::startHttpServer() {
     g_portal = this;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 6144;
-    cfg.max_uri_handlers = 30;
+    cfg.max_uri_handlers = 31;
     ESP_RETURN_ON_ERROR(httpd_start(&g_httpd, &cfg), kTag, "httpd_start");
 
     httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = rootHandler, .user_ctx = nullptr};
@@ -1105,6 +1135,7 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t save{.uri = "/save", .method = HTTP_POST, .handler = saveHandler, .user_ctx = nullptr};
     httpd_uri_t operating_mode{.uri = "/api/operating-mode", .method = HTTP_POST, .handler = operatingModeHandler, .user_ctx = nullptr};
     httpd_uri_t ride_logging{.uri = "/api/ride-logging", .method = HTTP_POST, .handler = rideLoggingHandler, .user_ctx = nullptr};
+    httpd_uri_t engineering{.uri = "/api/engineering", .method = HTTP_POST, .handler = engineeringHandler, .user_ctx = nullptr};
     httpd_uri_t selftest{.uri = "/selftest", .method = HTTP_GET, .handler = selfTestHandler, .user_ctx = nullptr};
     httpd_uri_t status{.uri = "/status", .method = HTTP_GET, .handler = statusHandler, .user_ctx = nullptr};
     httpd_uri_t ride_page{.uri = "/ride", .method = HTTP_GET, .handler = ridePageHandler, .user_ctx = nullptr};
@@ -1127,13 +1158,13 @@ esp_err_t SetupWifi::startHttpServer() {
     httpd_uri_t imu_capture_clear{.uri = "/api/imu-capture/clear", .method = HTTP_POST, .handler = imuCaptureClearHandler, .user_ctx = nullptr};
     httpd_uri_t imu_capture_status{.uri = "/api/imu-capture/status", .method = HTTP_GET, .handler = imuCaptureStatusHandler, .user_ctx = nullptr};
     httpd_uri_t imu_capture_download{.uri = "/api/imu-capture/download", .method = HTTP_GET, .handler = imuCaptureDownloadHandler, .user_ctx = nullptr};
-    httpd_uri_t bridge_confirm{.uri = "/api/calibration/confirm-signal", .method = HTTP_POST, .handler = bridgeConfirmHandler, .user_ctx = nullptr};
     httpd_uri_t sliding_zero_download{.uri = "/api/sliding-zero/download", .method = HTTP_GET, .handler = slidingZeroDownloadHandler, .user_ctx = nullptr};
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &root), kTag, "root handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &logo), kTag, "logo handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &save), kTag, "save handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &operating_mode), kTag, "operating mode handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_logging), kTag, "ride logging handler");
+    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &engineering), kTag, "engineering handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &selftest), kTag, "selftest handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &status), kTag, "status handler");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &ride_page), kTag, "ride page handler");
@@ -1156,7 +1187,6 @@ esp_err_t SetupWifi::startHttpServer() {
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_clear), kTag, "IMU capture clear");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_status), kTag, "IMU capture status");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &imu_capture_download), kTag, "IMU capture download");
-    ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &bridge_confirm), kTag, "bridge confirm");
     ESP_RETURN_ON_ERROR(httpd_register_uri_handler(g_httpd, &sliding_zero_download), kTag, "sliding zero download");
     return ESP_OK;
 }

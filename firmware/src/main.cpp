@@ -61,6 +61,15 @@ float g_provisional_total_degrees = 0.0F;
 uint32_t g_provisional_revolutions = 0;
 int64_t g_last_provisional_imu_us = 0;
 int64_t g_mqtt_started_us = 0;
+// Exponential backoff after repeated MQTT failures (e.g. an unreachable
+// broker). Retrying a route-level failure every evaluation interval never
+// helps it succeed and was observed to slowly exhaust sockets/PCBs shared
+// with the web server. Backoff is in-RAM only; it resets on every boot and
+// on the first success, and never disables the feature.
+uint32_t g_mqtt_consecutive_failures = 0;
+int64_t g_mqtt_next_attempt_us = 0;
+constexpr int64_t kMqttBackoffBaseUs = 30LL * 1000000LL;
+constexpr int64_t kMqttBackoffMaxUs = 30LL * 60LL * 1000000LL;
 
 const char *wakeReason() {
     switch (esp_sleep_get_wakeup_cause()) {
@@ -134,6 +143,15 @@ openwatts::BatteryReading readBattery() {
     return result;
 }
 
+void recordMqttFailure(int64_t now_us) {
+    if (g_mqtt_consecutive_failures < 16) ++g_mqtt_consecutive_failures;
+    int64_t backoff_us = kMqttBackoffBaseUs << (g_mqtt_consecutive_failures - 1);
+    if (backoff_us > kMqttBackoffMaxUs || backoff_us <= 0) backoff_us = kMqttBackoffMaxUs;
+    g_mqtt_next_attempt_us = now_us + backoff_us;
+    ESP_LOGW(kTag, "MQTT backing off %lld s after %u consecutive failures",
+             static_cast<long long>(backoff_us / 1000000LL), static_cast<unsigned>(g_mqtt_consecutive_failures));
+}
+
 bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::BatteryState state,
                         openwatts::ReportReason reason, bool usb_present, int64_t now_us) {
     const openwatts::LastRideSummary &ride = g_ride_log.lastRide();
@@ -172,6 +190,7 @@ bool startBatteryReport(const openwatts::BatteryReading &battery, openwatts::Bat
     if (mqtt_err != ESP_OK) {
         ESP_LOGW(kTag, "MQTT start failed: %s", esp_err_to_name(mqtt_err));
         g_report_history.retry_pending = true;
+        recordMqttFailure(now_us);
         return false;
     }
     g_mqtt_started_us = now_us;
@@ -196,8 +215,11 @@ void finishBatteryReport(const openwatts::BatteryReading &battery, openwatts::Ba
                 ESP_LOGW(kTag, "last ride acknowledgement save failed: %s", esp_err_to_name(ride_err));
             }
         }
+        g_mqtt_consecutive_failures = 0;
+        g_mqtt_next_attempt_us = 0;
     } else {
         g_report_history.retry_pending = true;
+        recordMqttFailure(now_us);
     }
     g_mqtt.stop();
     g_mqtt_started_us = 0;
@@ -346,7 +368,8 @@ extern "C" void app_main() {
 
             finishBatteryReport(status_battery, timer_state, timer_now_us);
             if (!g_mqtt.running() && timer_reason != openwatts::ReportReason::None &&
-                g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled) {
+                g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled &&
+                timer_now_us >= g_mqtt_next_attempt_us) {
                 if (!g_setup_wifi.active()) {
                     const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, timer_usb_present, false, true);
                     if (wifi_err != ESP_OK) {
@@ -668,6 +691,18 @@ extern "C" void app_main() {
             if (!openwatts::OperatingPolicy::permitsWifi(g_config, current_usb_present) && !ride_wifi_latched) {
                 g_setup_wifi.stop();
             }
+        } else if (g_mqtt.running() && g_mqtt_started_us != 0 &&
+                   now_us - g_mqtt_started_us >= kSleepReportTimeoutUs) {
+            // A client that never reaches a terminal event must not be left
+            // running indefinitely -- it can retry internally and exhaust
+            // sockets shared with the web server. This mirrors the pre-sleep
+            // deadline below but applies at all times, not only when about
+            // to sleep.
+            ESP_LOGW(kTag, "MQTT attempt exceeded watchdog; forcing stop");
+            g_mqtt.stop();
+            g_mqtt_started_us = 0;
+            g_report_history.retry_pending = true;
+            recordMqttFailure(now_us);
         }
         if (now_us - last_battery_policy_check_us >= static_cast<int64_t>(
                 openwatts::OperatingPolicy::mqttEvaluationIntervalSeconds(g_config, current_usb_present)) * 1000000LL) {
@@ -683,7 +718,8 @@ extern "C" void app_main() {
                 reason = openwatts::ReportReason::Manual;
             }
             if (!g_mqtt.running() && reason != openwatts::ReportReason::None &&
-                g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled) {
+                g_config.hasWifiCredentials() && g_config.mqtt_battery_notifications_enabled &&
+                now_us >= g_mqtt_next_attempt_us) {
                 if (!g_setup_wifi.active()) {
                     const esp_err_t wifi_err = g_setup_wifi.begin(g_config, g_settings, current_usb_present, false, true);
                     if (wifi_err != ESP_OK) {
