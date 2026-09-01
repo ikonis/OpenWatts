@@ -1103,7 +1103,13 @@ esp_err_t SetupWifi::calibrationTare() {
     if (!config_ || !storage_) return ESP_ERR_INVALID_STATE;
     DeviceConfig candidate = *config_;
     ESP_RETURN_ON_ERROR(calibration_.manualTare(candidate, live_status_.hx711_ready, live_status_.filtered_counts, live_status_.hx711_noise), kTag, "tare");
-    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save tare"); *config_ = candidate; return ESP_OK;
+    ESP_RETURN_ON_ERROR(storage_->save(candidate), kTag, "save tare"); *config_ = candidate;
+    // A manual tare re-anchors the raw zero, but any sliding-zero correction
+    // already accumulated on top of the old zero is now stale and would
+    // otherwise keep being added back in, leaving a residual right after a
+    // fresh tare instead of reading ~0.
+    if (power_ != nullptr) power_->resetSlidingZero();
+    return ESP_OK;
 }
 esp_err_t SetupWifi::calibrationReverse() {
     if (!config_ || !storage_ || !OperatingPolicy::permitsMaintenanceTools(*config_)) return ESP_ERR_INVALID_STATE;

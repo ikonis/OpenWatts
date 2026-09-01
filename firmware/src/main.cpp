@@ -241,6 +241,10 @@ void attemptRideZero(openwatts::RideZeroTrigger trigger, const openwatts::PowerS
     openwatts::DeviceConfig candidate = g_config;
     candidate.runtime_zero_offset_counts = attempt.zero_offset;
     candidate.zero_offset_counts = attempt.zero_offset;
+    // A newly accepted zero makes any sliding-zero correction already
+    // accumulated against the old zero stale; otherwise it keeps getting
+    // added back in and leaves a residual right after a fresh zero.
+    g_power.resetSlidingZero();
     constexpr float kBaselineLearningAlpha = 0.10F;
     candidate.ride_zero_baseline_stddev_counts = candidate.ride_zero_baseline_stddev_counts > 0.0F
         ? candidate.ride_zero_baseline_stddev_counts * (1.0F - kBaselineLearningAlpha) +
