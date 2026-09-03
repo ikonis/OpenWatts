@@ -12,6 +12,7 @@ _autosave-*
 firmware/.pio/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
+firmware/managed_components/
 
 # Debug/scratch dumps dropped at these specific spots during firmware
 # bring-up (ride/IMU/sliding-zero CSV pulls, NVS backups, ride screenshots) --
