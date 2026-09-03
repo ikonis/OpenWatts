@@ -24,6 +24,11 @@ struct SlidingZeroLogEntry {
     float baseline_nm = 0.0F;
     float correction_nm = 0.0F;
     bool baseline_established = false;
+    // Peak-to-trough range this revolution (window-median), and whether it
+    // was elevated enough above the learned baseline range to be treated as
+    // real rider effort and have correction learning skipped this revolution.
+    float range_nm = 0.0F;
+    bool effort_suppressed = false;
 };
 
 struct PowerSample {
@@ -92,15 +97,25 @@ private:
     // Sliding in-ride zero (low-torque-per-revolution tracking).
     float revolution_min_torque_nm_ = 0.0F;
     bool revolution_min_torque_valid_ = false;
+    float revolution_max_torque_nm_ = 0.0F;
+    bool revolution_max_torque_valid_ = false;
     static constexpr uint8_t kSlidingWindowCapacity = 8;
     float sliding_window_[kSlidingWindowCapacity]{};
+    // Peak-to-trough range per revolution, indexed in lockstep with
+    // sliding_window_. A real hard effort raises this range (the rider never
+    // fully unloads through the dead spot); genuine sensor drift shifts the
+    // whole waveform without widening it. Used to tell the two apart so
+    // interval-shaped rides (short high/low blocks) don't get read as drift.
+    float range_window_[kSlidingWindowCapacity]{};
     uint8_t sliding_window_count_ = 0;
     uint8_t sliding_window_index_ = 0;
     uint16_t sliding_baseline_revolution_count_ = 0;
     float sliding_zero_baseline_nm_ = 0.0F;
+    float sliding_zero_baseline_range_nm_ = 0.0F;
     bool sliding_zero_baseline_established_ = false;
     float sliding_zero_correction_nm_ = 0.0F;
     float slidingWindowMedian() const;
+    float slidingRangeWindowMedian() const;
 
     // Ring buffer of per-revolution sliding-zero log entries.
     std::array<SlidingZeroLogEntry, kSlidingZeroLogCapacity> sliding_zero_log_{};

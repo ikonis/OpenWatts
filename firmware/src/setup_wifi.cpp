@@ -632,18 +632,21 @@ esp_err_t slidingZeroDownloadHandler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/csv; charset=utf-8");
     httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=openwatts-sliding-zero.csv");
     ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(
-        req, "elapsed_ms,revolution_min_nm,window_median_nm,baseline_nm,correction_nm,baseline_established\n",
+        req, "elapsed_ms,revolution_min_nm,window_median_nm,baseline_nm,correction_nm,baseline_established,"
+             "range_nm,effort_suppressed\n",
         HTTPD_RESP_USE_STRLEN), kTag, "send CSV header");
-    char row[128];
+    char row[160];
     for (uint32_t i = 0; i < count; ++i) {
         const SlidingZeroLogEntry e = power->slidingZeroLogEntryAt(i);
-        const int length = std::snprintf(row, sizeof(row), "%u,%.3f,%.3f,%.3f,%.3f,%d\n",
+        const int length = std::snprintf(row, sizeof(row), "%u,%.3f,%.3f,%.3f,%.3f,%d,%.3f,%d\n",
                                          static_cast<unsigned>(e.elapsed_ms),
                                          static_cast<double>(e.revolution_min_nm),
                                          static_cast<double>(e.window_median_nm),
                                          static_cast<double>(e.baseline_nm),
                                          static_cast<double>(e.correction_nm),
-                                         e.baseline_established ? 1 : 0);
+                                         e.baseline_established ? 1 : 0,
+                                         static_cast<double>(e.range_nm),
+                                         e.effort_suppressed ? 1 : 0);
         ESP_RETURN_ON_ERROR(httpd_resp_send_chunk(req, row, length), kTag, "send CSV row");
     }
     return httpd_resp_send_chunk(req, nullptr, 0);

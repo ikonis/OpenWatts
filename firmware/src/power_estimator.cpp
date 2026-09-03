@@ -10,6 +10,13 @@ namespace openwatts {
 namespace {
 constexpr float kPi = 3.14159265358979323846F;
 constexpr const char *kSlidingZeroTag = "sliding_zero";
+// Both must hold before a revolution's widened peak-to-trough range is
+// treated as real effort rather than drift: the range must have grown by
+// this multiple of the learned baseline range, and by at least this many Nm
+// in absolute terms (so a very quiet baseline range doesn't make ordinary
+// noise look like a sprint).
+constexpr float kEffortRangeRatio = 1.6F;
+constexpr float kEffortRangeMinDeltaNm = 6.0F;
 
 float median(const float *values, uint8_t count) {
     float sorted[5]{};
@@ -93,6 +100,10 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
             revolution_min_torque_nm_ = latest_.torque_nm;
         }
         revolution_min_torque_valid_ = true;
+        if (!revolution_max_torque_valid_ || latest_.torque_nm > revolution_max_torque_nm_) {
+            revolution_max_torque_nm_ = latest_.torque_nm;
+        }
+        revolution_max_torque_valid_ = true;
     }
     if (!cadence.moving || !std::isfinite(cadence.rpm) || cadence.rpm <= 0.0F || cadence.rpm > 250.0F) {
         reject(PowerRejectionReason::InvalidCadence);
@@ -117,39 +128,58 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
     revolution_work_joules_ = 0.0F;
     revolution_angle_radians_ = 0.0F;
 
-    if (revolution_min_torque_valid_) {
+    if (revolution_min_torque_valid_ && revolution_max_torque_valid_) {
         sliding_window_[sliding_window_index_] = revolution_min_torque_nm_;
+        range_window_[sliding_window_index_] = revolution_max_torque_nm_ - revolution_min_torque_nm_;
         sliding_window_index_ = (sliding_window_index_ + 1U) % kSlidingWindowCapacity;
         if (sliding_window_count_ < kSlidingWindowCapacity) ++sliding_window_count_;
 
+        bool effort_suppressed = false;
         if (!sliding_zero_baseline_established_) {
             // First few revolutions after warmup set the reference dead-spot
             // level; nothing is corrected until this baseline exists.
             if (++sliding_baseline_revolution_count_ >= config_.sliding_zero_baseline_revolutions &&
                 sliding_window_count_ >= config_.sliding_zero_baseline_revolutions) {
                 sliding_zero_baseline_nm_ = slidingWindowMedian();
+                sliding_zero_baseline_range_nm_ = slidingRangeWindowMedian();
                 sliding_zero_baseline_established_ = true;
             }
         } else if (config_.sliding_zero_enabled &&
                    sliding_window_count_ >= config_.sliding_zero_window_revolutions) {
             const float current_nm = slidingWindowMedian();
-            const float error_nm = current_nm - sliding_zero_baseline_nm_;
-            // Deadband ignores noise-level wobble; a real error is walked
-            // down gradually (correction_fraction) rather than corrected in
-            // one step, so a single noisy revolution can't swing the zero.
-            if (std::fabs(error_nm) > config_.sliding_zero_deadband_nm) {
-                const float candidate_nm =
-                    sliding_zero_correction_nm_ + (error_nm * config_.sliding_zero_correction_fraction);
-                sliding_zero_correction_nm_ = std::clamp(
-                    candidate_nm, -config_.sliding_zero_max_correction_nm, config_.sliding_zero_max_correction_nm);
+            const float current_range_nm = slidingRangeWindowMedian();
+            // A real hard effort (a sprint, a micro-burst interval) raises
+            // the peak-to-trough range because the rider never fully unloads
+            // through the dead spot -- that looks like the trough drifting
+            // upward even though nothing on the sensor moved. Genuine zero
+            // drift shifts the whole waveform without widening it. Require
+            // both a relative and an absolute jump in range so a tiny
+            // baseline range can't make ordinary noise look like effort.
+            effort_suppressed = current_range_nm > sliding_zero_baseline_range_nm_ * kEffortRangeRatio &&
+                                 current_range_nm > sliding_zero_baseline_range_nm_ + kEffortRangeMinDeltaNm;
+            if (!effort_suppressed) {
+                const float error_nm = current_nm - sliding_zero_baseline_nm_;
+                // Deadband ignores noise-level wobble; a real error is walked
+                // down gradually (correction_fraction) rather than corrected
+                // in one step, so a single noisy revolution can't swing the
+                // zero.
+                if (std::fabs(error_nm) > config_.sliding_zero_deadband_nm) {
+                    const float candidate_nm =
+                        sliding_zero_correction_nm_ + (error_nm * config_.sliding_zero_correction_fraction);
+                    sliding_zero_correction_nm_ = std::clamp(
+                        candidate_nm, -config_.sliding_zero_max_correction_nm, config_.sliding_zero_max_correction_nm);
+                }
             }
         }
         if (config_.debug_logging_enabled) {
             ESP_LOGI(kSlidingZeroTag,
-                     "rev_min=%.3f window_med=%.3f baseline=%.3f (%s) correction=%.3f enabled=%d",
+                     "rev_min=%.3f window_med=%.3f baseline=%.3f (%s) range=%.3f base_range=%.3f "
+                     "suppressed=%d correction=%.3f enabled=%d",
                      static_cast<double>(revolution_min_torque_nm_), static_cast<double>(slidingWindowMedian()),
                      static_cast<double>(sliding_zero_baseline_nm_),
                      sliding_zero_baseline_established_ ? "set" : "learning",
+                     static_cast<double>(slidingRangeWindowMedian()),
+                     static_cast<double>(sliding_zero_baseline_range_nm_), effort_suppressed ? 1 : 0,
                      static_cast<double>(sliding_zero_correction_nm_), config_.sliding_zero_enabled ? 1 : 0);
         }
 
@@ -164,10 +194,13 @@ PowerSample PowerEstimator::update(int32_t raw_counts, float filtered_counts, fl
             entry.baseline_nm = sliding_zero_baseline_nm_;
             entry.correction_nm = sliding_zero_correction_nm_;
             entry.baseline_established = sliding_zero_baseline_established_;
+            entry.range_nm = slidingRangeWindowMedian();
+            entry.effort_suppressed = effort_suppressed;
             sliding_zero_log_index_ = (sliding_zero_log_index_ + 1U) % kSlidingZeroLogCapacity;
             if (sliding_zero_log_count_ < kSlidingZeroLogCapacity) ++sliding_zero_log_count_;
         }
         revolution_min_torque_valid_ = false;
+        revolution_max_torque_valid_ = false;
     }
 
     if (!std::isfinite(watts)) {
@@ -211,6 +244,7 @@ void PowerEstimator::reset() {
     revolution_work_joules_ = 0.0F;
     revolution_angle_radians_ = 0.0F;
     revolution_min_torque_valid_ = false;
+    revolution_max_torque_valid_ = false;
 }
 
 float PowerEstimator::slidingWindowMedian() const {
@@ -224,12 +258,24 @@ float PowerEstimator::slidingWindowMedian() const {
     return n ? sorted[n / 2] : 0.0F;
 }
 
+float PowerEstimator::slidingRangeWindowMedian() const {
+    const uint8_t n = std::min<uint8_t>(sliding_window_count_, config_.sliding_zero_window_revolutions);
+    float sorted[kSlidingWindowCapacity]{};
+    for (uint8_t i = 0; i < n; ++i) {
+        const uint8_t idx = (sliding_window_index_ + kSlidingWindowCapacity - 1U - i) % kSlidingWindowCapacity;
+        sorted[i] = range_window_[idx];
+    }
+    std::sort(sorted, sorted + n);
+    return n ? sorted[n / 2] : 0.0F;
+}
+
 void PowerEstimator::resetSlidingZero() {
     sliding_window_count_ = 0;
     sliding_window_index_ = 0;
     sliding_baseline_revolution_count_ = 0;
     sliding_zero_baseline_established_ = false;
     sliding_zero_baseline_nm_ = 0.0F;
+    sliding_zero_baseline_range_nm_ = 0.0F;
     sliding_zero_correction_nm_ = 0.0F;
     revolution_min_torque_valid_ = false;
     sliding_zero_log_count_ = 0;

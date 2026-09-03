@@ -12,6 +12,15 @@ _autosave-*
 firmware/.pio/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
+
+# Debug/scratch dumps dropped at these specific spots during firmware
+# bring-up (ride/IMU/sliding-zero CSV pulls, NVS backups, ride screenshots) --
+# not build inputs. Scoped narrowly so tracked assets elsewhere (docs/,
+# fab/, production/, firmware/partitions.csv) are unaffected.
+/Screenshot_*.png
+/firmware/*.bin
+/firmware/*.csv
+/firmware/src/*.csv
 __pycache__/
 *.pyc
 .claude/settings.local.json
